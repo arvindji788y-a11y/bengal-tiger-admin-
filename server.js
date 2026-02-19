@@ -122,10 +122,37 @@ const wss = new WebSocket.Server({
 wss.on('connection', (ws) => {
     console.log('📱 WebSocket connected from Android app');
     
+    // Emit dashboard update when device connects
+    if (global.io) {
+        global.io.emit('dashboard-update', { 
+            event: 'device-connected',
+            timestamp: new Date()
+        });
+        console.log('📊 Dashboard update emitted for new device connection');
+    }
+    
     ws.on('message', (message) => {
         try {
             console.log('📨 WebSocket message received:', message);
-            // Broadcast to all connected clients
+            
+            // Parse incoming data and emit dashboard update
+            try {
+                const data = JSON.parse(message);
+                if (data.deviceId || data.serialNumber) {
+                    if (global.io) {
+                        global.io.emit('dashboard-update', { 
+                            event: 'device-data-update',
+                            device: data,
+                            timestamp: new Date()
+                        });
+                        console.log('📊 Dashboard update emitted for device data');
+                    }
+                }
+            } catch (parseErr) {
+                console.log('ℹ️ Message is not JSON, treating as plain text');
+            }
+            
+            // Broadcast to all connected WebSocket clients
             wss.clients.forEach((client) => {
                 if (client.readyState === WebSocket.OPEN) {
                     client.send(JSON.stringify({ 
@@ -141,6 +168,15 @@ wss.on('connection', (ws) => {
     
     ws.on('close', () => {
         console.log('📱 WebSocket disconnected');
+        
+        // Emit dashboard update when device disconnects
+        if (global.io) {
+            global.io.emit('dashboard-update', { 
+                event: 'device-disconnected',
+                timestamp: new Date()
+            });
+            console.log('📊 Dashboard update emitted for device disconnection');
+        }
     });
     
     ws.on('error', (error) => {
