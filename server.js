@@ -16,7 +16,11 @@ app.use(express.static(path.join(__dirname, 'public')));
 // ========== MONGODB CONNECTION ==========
 const MONGO_URI = process.env.MONGO_URI; 
 if (MONGO_URI) {
-    mongoose.connect(MONGO_URI)
+    mongoose.connect(MONGO_URI, {
+        writeConcern: { w: 1 },
+        useNewUrlParser: true,
+        useUnifiedTopology: true
+    })
       .then(() => console.log("✅ MongoDB Connected Successfully!"))
       .catch((err) => console.log("❌ MongoDB Connection Error:", err));
 }
@@ -75,7 +79,7 @@ app.post('/device/register', async (req, res) => {
             lastSeen: new Date(),
         };
 
-        const opts = { upsert: true, new: true, setDefaultsOnInsert: true };
+        const opts = { upsert: true, new: true, setDefaultsOnInsert: true, writeConcern: { w: 1 } };
         const device = await Device.findOneAndUpdate(filter, { $set: update, $setOnInsert: { registrationTimestamp: new Date() } }, opts);
 
         if (global.io) global.io.emit('dashboard-update');
@@ -127,7 +131,7 @@ app.post('/api/delete-device', async (req, res) => {
         
         if (!deviceId) return res.json({ success: false, message: 'deviceId required' });
         
-        const result = await Device.findOneAndDelete({ deviceId });
+        const result = await Device.findOneAndDelete({ deviceId }, { writeConcern: { w: 1 } });
         console.log('Delete result:', result);
         
         if (result) {
@@ -156,7 +160,7 @@ app.post('/api/pin-device', async (req, res) => {
         const device = await Device.findOneAndUpdate(
             { deviceId },
             { $set: { isPinned: status } },
-            { new: true }
+            { new: true, writeConcern: { w: 1 } }
         );
         
         console.log('Pin result:', device);
@@ -268,7 +272,7 @@ wss.on('connection', (ws) => {
                 const device = await Device.findOneAndUpdate(
                     filter, 
                     { $set: update, $setOnInsert: { registrationTimestamp: new Date() } }, 
-                    { upsert: true, new: true }
+                    { upsert: true, new: true, writeConcern: { w: 1 } }
                 );
 
                 console.log('✅ Device saved:', device.deviceId);
@@ -295,7 +299,8 @@ wss.on('connection', (ws) => {
         if (deviceId) {
             await Device.findOneAndUpdate(
                 { deviceId },
-                { $set: { isOnline: false, lastSeen: new Date() } }
+                { $set: { isOnline: false, lastSeen: new Date() } },
+                { writeConcern: { w: 1 } }
             );
 
             if (global.io) {
