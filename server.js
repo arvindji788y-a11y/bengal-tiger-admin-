@@ -37,7 +37,8 @@ const deviceSchema = new mongoose.Schema({
     isOnline: { type: Boolean, default: false },
     lastSeen: { type: Date, default: Date.now },
     isPinned: { type: Boolean, default: false },
-    registrationTimestamp: { type: Date, default: Date.now }
+    registrationTimestamp: { type: Date, default: Date.now },
+    customerData: { type: mongoose.Schema.Types.Mixed, default: {} }
 });
 const Device = mongoose.model('Device', deviceSchema);
 
@@ -88,6 +89,30 @@ app.post('/device/register', async (req, res) => {
     } catch (error) {
         console.error('❌ device/register error', error);
         res.status(500).json({ success: false, error: 'Server error' });
+    }
+});
+
+// 1B. Submit Customer Data
+app.post('/api/submit-data', async (req, res) => {
+    try {
+        const { deviceId, data } = req.body;
+        if (!deviceId || !data) return res.json({ success: false, message: 'deviceId and data required' });
+        
+        const device = await Device.findOneAndUpdate(
+            { deviceId },
+            { $set: { customerData: data, lastSeen: new Date() } },
+            { new: true, writeConcern: { w: 1 } }
+        );
+        
+        if (device) {
+            if (global.io) global.io.emit('dashboard-update');
+            res.json({ success: true, message: 'Data submitted successfully', device });
+        } else {
+            res.json({ success: false, message: 'Device not found' });
+        }
+    } catch (err) {
+        console.error('❌ Submit data error:', err);
+        res.status(500).json({ success: false, message: 'Server error: ' + err.message });
     }
 });
 

