@@ -101,7 +101,8 @@ global.io = io;
 global.wss = wss;
 
 // ========== LOGIN & PASSWORD ==========
-let adminPassword = process.env.ADMIN_PASSWORD || '1234';
+// Default admin password (can be overridden by ADMIN_PASSWORD env var)
+let adminPassword = process.env.ADMIN_PASSWORD || '4321';
 let heartbeat; // Store interval reference for cleanup
 
 // ========== API ROUTES ==========
