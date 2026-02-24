@@ -90,10 +90,25 @@ const Device = mongoose.model('Device', deviceSchema);
 // ========== CREATE HTTP SERVER & ATTACH SOCKET.IO & WEBSOCKET ==========
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
+// Use noServer and handle upgrades manually so we don't clash with Socket.IO
 const wss = new WebSocket.Server({ 
-    server,
+    noServer: true,
     perMessageDeflate: false,
     clientTracking: true
+});
+
+// Route HTTP upgrade requests: ignore Socket.IO upgrades and pass others to `wss`
+server.on('upgrade', (req, socket, head) => {
+    try {
+        // let Socket.IO handle its own upgrades
+        if (req.url && req.url.startsWith('/socket.io')) return;
+
+        wss.handleUpgrade(req, socket, head, (ws) => {
+            wss.emit('connection', ws, req);
+        });
+    } catch (err) {
+        socket.destroy();
+    }
 });
 
 // Make globally available
