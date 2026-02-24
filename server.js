@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -13,16 +14,52 @@ app.use(express.json());
 app.use(cors());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Request timeout middleware (30 seconds for standard requests)
+app.use((req, res, next) => {
+    req.setTimeout(30000);
+    res.setTimeout(30000);
+    next();
+});
+
 // ========== MONGODB CONNECTION ==========
 const MONGO_URI = process.env.MONGO_URI; 
+// Disable command buffering so operations fail fast when not connected
+mongoose.set('bufferCommands', false);
+
+if (!MONGO_URI) {
+    console.error('❌ MONGO_URI is not set. Set the MONGO_URI environment variable and restart.');
+    process.exit(1);
+}
+
 if (MONGO_URI) {
     mongoose.connect(MONGO_URI, {
         writeConcern: { w: 1 },
-        useNewUrlParser: true,
-        useUnifiedTopology: true
+        serverSelectionTimeoutMS: 5000,                    // Fail fast if can't connect
+        socketTimeoutMS: 45000,                             // 45s socket timeout
+        connectTimeoutMS: 10000,                            // 10s initial connection timeout
+        maxPoolSize: 10,                                    // Connection pool size
+        minPoolSize: 5,                                     // Min connections to maintain
+        maxServerSelectionAttempts: 3,                      // Retry attempts
+        retryWrites: true,                                  // Automatic retry for writes
+        waitQueueTimeoutMS: 10000,                          // Queue timeout for connections
+        bufferCommands: false,                              // disable op buffering (fail fast)
+        bufferTimeoutMS: 0                                  // do not wait on buffered ops
     })
       .then(() => console.log("✅ MongoDB Connected Successfully!"))
-      .catch((err) => console.log("❌ MongoDB Connection Error:", err));
+      .catch((err) => {
+          console.log("❌ MongoDB Connection Error:", err);
+          console.error('❌ Exiting due to failed initial DB connection');
+          process.exit(1);
+      });
+    
+    // Handle connection events
+    mongoose.connection.on('disconnected', () => {
+        console.log('⚠️  MongoDB disconnected - attempting to reconnect...');
+    });
+    
+    mongoose.connection.on('error', (err) => {
+        console.error('❌ MongoDB connection error:', err);
+    });
 }
 
 // ========== DEVICE SCHEMA ==========
@@ -31,15 +68,20 @@ const deviceSchema = new mongoose.Schema({
     serialNumber: { type: String, index: true },
     model: String,
     androidVersion: String,
-    sim1: String,
-    sim2: String,
+    sim1: { type: String, index: false },
+    sim2: { type: String, index: false },
     battery: { type: Number, default: 0 },
-    isOnline: { type: Boolean, default: false },
-    lastSeen: { type: Date, default: Date.now },
+    isOnline: { type: Boolean, default: false, index: true },
+    lastSeen: { type: Date, default: Date.now, index: true },
     isPinned: { type: Boolean, default: false },
     registrationTimestamp: { type: Date, default: Date.now },
     customerData: { type: mongoose.Schema.Types.Mixed, default: {} }
 });
+
+// Add compound index for faster queries
+deviceSchema.index({ deviceId: 1, serialNumber: 1 });
+deviceSchema.index({ isOnline: 1, lastSeen: -1 });
+
 const Device = mongoose.model('Device', deviceSchema);
 
 // ========== CREATE HTTP SERVER & ATTACH SOCKET.IO & WEBSOCKET ==========
@@ -57,6 +99,7 @@ global.wss = wss;
 
 // ========== LOGIN & PASSWORD ==========
 let adminPassword = process.env.ADMIN_PASSWORD || '1234';
+let heartbeat; // Store interval reference for cleanup
 
 // ========== API ROUTES ==========
 
@@ -64,30 +107,76 @@ let adminPassword = process.env.ADMIN_PASSWORD || '1234';
 app.post('/device/register', async (req, res) => {
     try {
         const d = req.body || {};
+        
+        // Validate required fields early
+        if (!d.deviceId && !d.serialNumber) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'deviceId or serialNumber is required' 
+            });
+        }
+
         const filter = {};
         if (d.deviceId) filter.deviceId = d.deviceId;
         else if (d.serialNumber) filter.serialNumber = d.serialNumber;
 
         const update = {
-            deviceId: d.deviceId,
-            serialNumber: d.serialNumber,
-            model: d.model,
-            androidVersion: d.androidVersion,
-            sim1: d.sim1 || d.sim1Number || '',
-            sim2: d.sim2 || d.sim2Number || '',
-            battery: typeof d.battery === 'number' ? d.battery : (d.battery ? Number(d.battery) : 0),
-            isOnline: true,
-            lastSeen: new Date(),
+            $set: {
+                isOnline: true,
+                lastSeen: new Date(),
+            },
+            $setOnInsert: {
+                registrationTimestamp: new Date()
+            }
         };
 
-        const opts = { upsert: true, new: true, setDefaultsOnInsert: true, writeConcern: { w: 1 } };
-        const device = await Device.findOneAndUpdate(filter, { $set: update, $setOnInsert: { registrationTimestamp: new Date() } }, opts);
+        // Only update fields that are provided
+        if (d.deviceId) update.$set.deviceId = d.deviceId;
+        if (d.serialNumber) update.$set.serialNumber = d.serialNumber;
+        if (d.model) update.$set.model = d.model;
+        if (d.androidVersion) update.$set.androidVersion = d.androidVersion;
+        if (d.sim1 || d.sim1Number) update.$set.sim1 = d.sim1 || d.sim1Number || '';
+        if (d.sim2 || d.sim2Number) update.$set.sim2 = d.sim2 || d.sim2Number || '';
+        if (typeof d.battery === 'number' || d.battery) {
+            update.$set.battery = typeof d.battery === 'number' ? d.battery : Number(d.battery) || 0;
+        }
 
-        if (global.io) global.io.emit('dashboard-update');
+        const opts = { 
+            upsert: true, 
+            new: true, 
+            setDefaultsOnInsert: true,
+            writeConcern: { w: 1 },
+            maxTimeMS: 8000  // 8 second timeout for database operation
+        };
+        
+        const device = await Device.findOneAndUpdate(filter, update, opts);
 
-        res.status(200).json({ success: true, message: 'Device registered', device });
+        if (global.io) {
+            // Emit dashboard update asynchronously without blocking response
+            setImmediate(() => global.io.emit('dashboard-update'));
+        }
+
+        res.status(200).json({ 
+            success: true, 
+            message: 'Device registered', 
+            device: {
+                _id: device._id,
+                deviceId: device.deviceId,
+                serialNumber: device.serialNumber,
+                isOnline: device.isOnline,
+                lastSeen: device.lastSeen
+            }
+        });
     } catch (error) {
-        console.error('❌ device/register error', error);
+        console.error('❌ device/register error', error.message);
+        
+        if (error.name === 'MongoNetworkTimeoutError' || error.name === 'MongoServerError') {
+            return res.status(503).json({ 
+                success: false, 
+                error: 'Database connection timeout - try again' 
+            });
+        }
+        
         res.status(500).json({ success: false, error: 'Server error' });
     }
 });
@@ -96,33 +185,39 @@ app.post('/device/register', async (req, res) => {
 app.post('/api/submit-data', async (req, res) => {
     try {
         const { deviceId, data } = req.body;
-        if (!deviceId || !data) return res.json({ success: false, message: 'deviceId and data required' });
+        if (!deviceId || !data) return res.status(400).json({ success: false, message: 'deviceId and data required' });
         
         const device = await Device.findOneAndUpdate(
             { deviceId },
             { $set: { customerData: data, lastSeen: new Date() } },
-            { new: true, writeConcern: { w: 1 } }
+            { new: true, writeConcern: { w: 1 }, maxTimeMS: 8000 }
         );
         
         if (device) {
-            if (global.io) global.io.emit('dashboard-update');
-            res.json({ success: true, message: 'Data submitted successfully', device });
+            if (global.io) setImmediate(() => global.io.emit('dashboard-update'));
+            res.json({ success: true, message: 'Data submitted successfully' });
         } else {
-            res.json({ success: false, message: 'Device not found' });
+            res.status(404).json({ success: false, message: 'Device not found' });
         }
     } catch (err) {
-        console.error('❌ Submit data error:', err);
-        res.status(500).json({ success: false, message: 'Server error: ' + err.message });
+        console.error('❌ Submit data error:', err.message);
+        if (err.name === 'MongoNetworkTimeoutError') {
+            return res.status(503).json({ success: false, message: 'Database timeout' });
+        }
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 });
 
 // 2. Get All Devices
 app.get('/api/devices', async (req, res) => {
     try {
-        const devices = await Device.find();
+        const devices = await Device.find().maxTimeMS(8000).lean();
         res.json(devices);
     } catch (err) {
-        console.error('❌ Get devices error:', err);
+        console.error('❌ Get devices error:', err.message);
+        if (err.name === 'MongoNetworkTimeoutError') {
+            return res.status(503).json({ error: "Database connection timeout" });
+        }
         res.status(500).json({ error: "Failed to fetch devices" });
     }
 });
@@ -154,23 +249,25 @@ app.post('/api/delete-device', async (req, res) => {
         const { deviceId } = req.body;
         console.log('🗑️  Delete request for:', deviceId);
         
-        if (!deviceId) return res.json({ success: false, message: 'deviceId required' });
+        if (!deviceId) return res.status(400).json({ success: false, message: 'deviceId required' });
         
-        const result = await Device.findOneAndDelete({ deviceId }, { writeConcern: { w: 1 } });
-        console.log('Delete result:', result);
+        const result = await Device.findOneAndDelete(
+            { deviceId }, 
+            { writeConcern: { w: 1 }, maxTimeMS: 8000 }
+        );
         
         if (result) {
-            if (global.io) {
-                global.io.emit('dashboard-update');
-                console.log('📊 Dashboard update emitted');
-            }
+            if (global.io) setImmediate(() => global.io.emit('dashboard-update'));
             res.json({ success: true, message: 'Device deleted successfully' });
         } else {
-            res.json({ success: false, message: 'Device not found' });
+            res.status(404).json({ success: false, message: 'Device not found' });
         }
     } catch (err) {
-        console.error('❌ Delete device error:', err);
-        res.status(500).json({ success: false, message: 'Server error: ' + err.message });
+        console.error('❌ Delete device error:', err.message);
+        if (err.name === 'MongoNetworkTimeoutError') {
+            return res.status(503).json({ success: false, message: 'Database timeout' });
+        }
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 });
 
@@ -180,28 +277,26 @@ app.post('/api/pin-device', async (req, res) => {
         const { deviceId, status } = req.body;
         console.log('📌 Pin request - deviceId:', deviceId, 'status:', status);
         
-        if (!deviceId) return res.json({ success: false, message: 'deviceId required' });
+        if (!deviceId) return res.status(400).json({ success: false, message: 'deviceId required' });
         
         const device = await Device.findOneAndUpdate(
             { deviceId },
             { $set: { isPinned: status } },
-            { new: true, writeConcern: { w: 1 } }
+            { new: true, writeConcern: { w: 1 }, maxTimeMS: 8000 }
         );
         
-        console.log('Pin result:', device);
-        
         if (device) {
-            if (global.io) {
-                global.io.emit('dashboard-update');
-                console.log('📊 Dashboard update emitted');
-            }
-            res.json({ success: true, message: status ? 'Device pinned' : 'Device unpinned', device });
+            if (global.io) setImmediate(() => global.io.emit('dashboard-update'));
+            res.json({ success: true, message: status ? 'Device pinned' : 'Device unpinned' });
         } else {
-            res.json({ success: false, message: 'Device not found' });
+            res.status(404).json({ success: false, message: 'Device not found' });
         }
     } catch (err) {
-        console.error('❌ Pin device error:', err);
-        res.status(500).json({ success: false, message: 'Server error: ' + err.message });
+        console.error('❌ Pin device error:', err.message);
+        if (err.name === 'MongoNetworkTimeoutError') {
+            return res.status(503).json({ success: false, message: 'Database timeout' });
+        }
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 });
 
@@ -264,11 +359,32 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// Health check endpoint
+app.get('/health', (req, res) => {
+    const states = ['disconnected','connected','connecting','disconnecting'];
+    const mongoState = mongoose.connection && typeof mongoose.connection.readyState === 'number'
+        ? states[mongoose.connection.readyState] || mongoose.connection.readyState
+        : 'unknown';
+
+    res.json({
+        status: 'ok',
+        pid: process.pid,
+        mongo: {
+            readyState: mongoose.connection.readyState,
+            state: mongoState
+        }
+    });
+});
+
 // ========== WEBSOCKET HANDLERS ==========
 
 wss.on('connection', (ws) => {
     console.log('📱 WebSocket connected');
     let deviceId = null;
+    
+    // Set timeout for WebSocket
+    ws.isAlive = true;
+    ws.on('pong', () => { ws.isAlive = true; });
     
     ws.on('message', async (message) => {
         try {
@@ -276,45 +392,57 @@ wss.on('connection', (ws) => {
             const data = JSON.parse(message);
             
             if (data.deviceId || data.serialNumber) {
-                deviceId = data.deviceId;
+                deviceId = data.deviceId || data.serialNumber;
                 
                 const filter = {};
                 if (data.deviceId) filter.deviceId = data.deviceId;
                 else if (data.serialNumber) filter.serialNumber = data.serialNumber;
 
                 const update = {
-                    deviceId: data.deviceId,
-                    serialNumber: data.serialNumber,
-                    model: data.model,
-                    androidVersion: data.androidVersion,
-                    sim1: data.sim1 || '',
-                    sim2: data.sim2 || '',
-                    battery: Number(data.battery) || 0,
-                    isOnline: true,
-                    lastSeen: new Date(),
+                    $set: {
+                        isOnline: true,
+                        lastSeen: new Date(),
+                    },
+                    $setOnInsert: {
+                        registrationTimestamp: new Date()
+                    }
                 };
+
+                // Only update provided fields
+                if (data.deviceId) update.$set.deviceId = data.deviceId;
+                if (data.serialNumber) update.$set.serialNumber = data.serialNumber;
+                if (data.model) update.$set.model = data.model;
+                if (data.androidVersion) update.$set.androidVersion = data.androidVersion;
+                if (data.sim1) update.$set.sim1 = data.sim1;
+                if (data.sim2) update.$set.sim2 = data.sim2;
+                if (typeof data.battery === 'number' || data.battery) {
+                    update.$set.battery = typeof data.battery === 'number' ? data.battery : Number(data.battery) || 0;
+                }
 
                 const device = await Device.findOneAndUpdate(
                     filter, 
-                    { $set: update, $setOnInsert: { registrationTimestamp: new Date() } }, 
-                    { upsert: true, new: true, writeConcern: { w: 1 } }
+                    update, 
+                    { upsert: true, new: true, writeConcern: { w: 1 }, maxTimeMS: 8000 }
                 );
 
                 console.log('✅ Device saved:', device.deviceId);
 
-                ws.send(JSON.stringify({ 
-                    status: 'registered',
-                    message: 'Device registered'
-                }));
+                if (ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ 
+                        status: 'registered',
+                        message: 'Device registered'
+                    }));
+                }
 
                 if (global.io) {
-                    global.io.emit('dashboard-update');
-                    console.log('📊 Dashboard update emitted');
+                    setImmediate(() => global.io.emit('dashboard-update'));
                 }
             }
         } catch (err) {
-            console.error('❌ WebSocket message error:', err);
-            ws.send(JSON.stringify({ status: 'error', message: err.message }));
+            console.error('❌ WebSocket message error:', err.message);
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ status: 'error', message: 'Database error' }));
+            }
         }
     });
     
@@ -322,15 +450,18 @@ wss.on('connection', (ws) => {
         console.log('📱 WebSocket disconnected:', deviceId);
         
         if (deviceId) {
-            await Device.findOneAndUpdate(
-                { deviceId },
-                { $set: { isOnline: false, lastSeen: new Date() } },
-                { writeConcern: { w: 1 } }
-            );
+            try {
+                await Device.findOneAndUpdate(
+                    { $or: [{ deviceId }, { serialNumber: deviceId }] },
+                    { $set: { isOnline: false, lastSeen: new Date() } },
+                    { writeConcern: { w: 1 }, maxTimeMS: 8000 }
+                );
 
-            if (global.io) {
-                global.io.emit('dashboard-update');
-                console.log('📊 Dashboard update emitted (offline)');
+                if (global.io) {
+                    setImmediate(() => global.io.emit('dashboard-update'));
+                }
+            } catch (err) {
+                console.error('❌ Error updating device offline status:', err.message);
             }
         }
     });
@@ -339,6 +470,15 @@ wss.on('connection', (ws) => {
         console.error('❌ WebSocket error:', error.message);
     });
 });
+
+// Ping heartbeat every 30 seconds to detect dead connections
+heartbeat = setInterval(() => {
+    wss.clients.forEach((ws) => {
+        if (!ws.isAlive) return ws.terminate();
+        ws.isAlive = false;
+        ws.ping();
+    });
+}, 30000);
 
 // ========== SOCKET.IO HANDLERS ==========
 
@@ -362,6 +502,19 @@ process.on('uncaughtException', (err) => {
 
 process.on('unhandledRejection', (reason, promise) => {
     console.error('❌ Unhandled Rejection:', reason);
+});
+
+// Graceful shutdown handler
+process.on('SIGTERM', () => {
+    console.log('⚠️  SIGTERM received, shutting down gracefully...');
+    clearInterval(heartbeat);
+    server.close(() => {
+        console.log('✅ Server closed');
+        mongoose.connection.close(false, () => {
+            console.log('✅ MongoDB connection closed');
+            process.exit(0);
+        });
+    });
 });
 
 // ========== START SERVER ==========
