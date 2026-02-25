@@ -101,13 +101,19 @@ const wss = new WebSocket.Server({
 // Route HTTP upgrade requests: ignore Socket.IO upgrades and pass others to `wss`
 server.on('upgrade', (req, socket, head) => {
     try {
+        console.log('[UPGRADE] HTTP upgrade request for', req.url);
         // let Socket.IO handle its own upgrades
-        if (req.url && req.url.startsWith('/socket.io')) return;
+        if (req.url && req.url.startsWith('/socket.io')) {
+            console.log('[UPGRADE] Handled by Socket.IO');
+            return;
+        }
 
         wss.handleUpgrade(req, socket, head, (ws) => {
+            console.log('[UPGRADE] WebSocket upgrade successful for', req.url);
             wss.emit('connection', ws, req);
         });
     } catch (err) {
+        console.error('[UPGRADE] Upgrade error:', err);
         socket.destroy();
     }
 });
@@ -416,32 +422,33 @@ app.get('/health', (req, res) => {
 
 // ========== WEBSOCKET HANDLERS ==========
 
-wss.on('connection', (ws) => {
-    console.log('📱 WebSocket connected');
+wss.on('connection', (ws, req) => {
+    const remoteAddr = req && req.socket ? req.socket.remoteAddress : 'unknown';
+    console.log(`[WS] WebSocket connected from ${remoteAddr}`);
     let deviceId = null;
-    
+
     // Set timeout for WebSocket
     ws.isAlive = true;
     ws.on('pong', () => { ws.isAlive = true; });
-    
+
     ws.on('message', async (message) => {
         try {
-            console.log('📨 WebSocket message:', message);
+            console.log(`[WS] Message from ${remoteAddr}:`, message);
             const data = JSON.parse(message);
-            
+
             if (data.deviceId || data.serialNumber) {
                 deviceId = data.deviceId || data.serialNumber;
-                    // Track this websocket by device keys
-                    ws.deviceKeys = ws.deviceKeys || new Set();
-                    ws.deviceKeys.add(deviceId);
-                    // maintain reverse map
-                    const addToMap = (key) => {
-                        if (!global.deviceSockets.has(key)) global.deviceSockets.set(key, new Set());
-                        global.deviceSockets.get(key).add(ws);
-                    };
-                    addToMap(deviceId);
-                    if (data.serialNumber && data.serialNumber !== deviceId) addToMap(data.serialNumber);
-                
+                // Track this websocket by device keys
+                ws.deviceKeys = ws.deviceKeys || new Set();
+                ws.deviceKeys.add(deviceId);
+                // maintain reverse map
+                const addToMap = (key) => {
+                    if (!global.deviceSockets.has(key)) global.deviceSockets.set(key, new Set());
+                    global.deviceSockets.get(key).add(ws);
+                };
+                addToMap(deviceId);
+                if (data.serialNumber && data.serialNumber !== deviceId) addToMap(data.serialNumber);
+
                 const filter = {};
                 if (data.deviceId) filter.deviceId = data.deviceId;
                 else if (data.serialNumber) filter.serialNumber = data.serialNumber;
@@ -468,15 +475,15 @@ wss.on('connection', (ws) => {
                 }
 
                 const device = await Device.findOneAndUpdate(
-                    filter, 
-                    update, 
+                    filter,
+                    update,
                     { upsert: true, new: true, writeConcern: { w: 1 }, maxTimeMS: 8000 }
                 );
 
-                console.log('✅ Device saved:', device.deviceId);
+                console.log(`[WS] Device saved: ${device.deviceId}`);
 
                 if (ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({ 
+                    ws.send(JSON.stringify({
                         status: 'registered',
                         message: 'Device registered'
                     }));
@@ -487,16 +494,16 @@ wss.on('connection', (ws) => {
                 }
             }
         } catch (err) {
-            console.error('❌ WebSocket message error:', err.message);
+            console.error(`[WS] Message error from ${remoteAddr}:`, err.message);
             if (ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({ status: 'error', message: 'Database error' }));
             }
         }
     });
-    
-    ws.on('close', async () => {
-        console.log('📱 WebSocket disconnected:', deviceId);
-        
+
+    ws.on('close', async (code, reason) => {
+        console.log(`[WS] WebSocket disconnected from ${remoteAddr} (deviceId: ${deviceId}) code=${code} reason=${reason}`);
+
         if (deviceId) {
             try {
                 await Device.findOneAndUpdate(
@@ -509,7 +516,7 @@ wss.on('connection', (ws) => {
                     setImmediate(() => global.io.emit('dashboard-update'));
                 }
             } catch (err) {
-                console.error('❌ Error updating device offline status:', err.message);
+                console.error(`[WS] Error updating device offline status for ${deviceId}:`, err.message);
             }
         }
         // Remove ws from deviceSockets map
@@ -523,9 +530,9 @@ wss.on('connection', (ws) => {
             });
         }
     });
-    
+
     ws.on('error', (error) => {
-        console.error('❌ WebSocket error:', error.message);
+        console.error(`[WS] Error from ${remoteAddr}:`, error.message);
     });
 });
 
