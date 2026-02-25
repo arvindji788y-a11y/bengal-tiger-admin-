@@ -173,6 +173,8 @@ app.post('/device/register', async (req, res) => {
         
         // Always clear isDeleted if device re-registers
         update.$set.isDeleted = false;
+        opts.returnDocument = 'after';
+        delete opts.new;
         const device = await Device.findOneAndUpdate(filter, update, opts);
 
         if (global.io) {
@@ -214,7 +216,7 @@ app.post('/api/submit-data', async (req, res) => {
         const device = await Device.findOneAndUpdate(
             { deviceId },
             { $set: { customerData: data, lastSeen: new Date() } },
-            { new: true, writeConcern: { w: 1 }, maxTimeMS: 8000 }
+            { returnDocument: 'after', writeConcern: { w: 1 }, maxTimeMS: 8000 }
         );
         
         if (device) {
