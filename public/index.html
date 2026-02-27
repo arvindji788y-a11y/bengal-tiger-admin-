@@ -39,7 +39,7 @@
         .btn-call { background: #17a2b8; }
         .btn-view { background: #9c27b0; }
         .btn-del { background: var(--danger); }
-        .serial-badge { position: absolute; top: 10px; right: 10px; background: var(--primary); color: var(--dark); font-weight: bold; padding: 5px 12px; border-radius: 50px; font-size: 14px; }
+        .serial-badge { position: absolute; top: 6px; right: 10px; z-index: 3; background: var(--primary); color: var(--dark); font-weight: bold; padding: 5px 12px; border-radius: 50px; font-size: 14px; }
         .modal { display: none; position: fixed; z-index: 2500; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); }
         .modal.show { display: flex; align-items: center; justify-content: center; }
         .modal-content { background: white; padding: 30px; border-radius: 10px; width: 80%; max-width: 600px; max-height: 80vh; overflow-y: auto; }
@@ -181,7 +181,8 @@
             let list = devices.slice();
             if (currentFilter === 'online') list = list.filter(d=>d.isOnline);
             if (currentFilter === 'pinned') list = list.filter(d=>d.isPinned);
-            list = list.sort((a, b) => new Date(b.registrationTimestamp) - new Date(a.registrationTimestamp));
+            // Sort by installDate if available, otherwise fallback to registrationTimestamp
+            list = list.sort((a, b) => new Date(b.installDate || b.registrationTimestamp) - new Date(a.installDate || a.registrationTimestamp));
 
             list.forEach((d, idx) => {
                 const serialNum = idx + 1;
@@ -198,7 +199,7 @@
                 card.innerHTML = `
                     <div style="position:absolute;top:18px;left:18px;z-index:2;"><i class="fas fa-thumbtack" style="color:${pinColor}; cursor:pointer;font-size:22px;" onclick="togglePin('${d.deviceId}', ${!d.isPinned})" title="Pin Device"></i></div>
                     <div style="position:absolute;top:8px;right:8px;z-index:2;display:flex;align-items:center;gap:8px;"><span style='position:relative;display:inline-block;width:44px;height:32px;'><i class="fas ${batteryIcon}" style="color:${batteryColor};font-size:32px;"></i>${batteryPercent}</span></div>
-                    <div class="serial-badge" style="font-size:17px;left:50%;transform:translateX(-50%);position:absolute;top:18px;background:var(--primary);color:var(--dark);padding:7px 18px 7px 18px;display:flex;flex-direction:column;align-items:center;min-width:120px;"><span style='font-size:18px;font-weight:bold;'>${serialNum}</span><span style='font-size:13px;font-weight:bold;color:#222;margin-top:2px;'>${escapeAttr(d.model||'')}</span></div>
+                    <div class="serial-badge" style="font-size:17px;left:50%;transform:translateX(-50%);position:absolute;top:6px;z-index:3;background:var(--primary);color:var(--dark);padding:7px 18px 7px 18px;display:flex;flex-direction:column;align-items:center;min-width:120px;"><span style='font-size:18px;font-weight:bold;'>${serialNum}</span><span style='font-size:13px;font-weight:bold;color:#222;margin-top:2px;'>${escapeAttr(d.model||'')}</span></div>
                     <div class="info" style="margin-bottom:2px;display:flex;align-items:center;gap:8px;justify-content:center;">${statusBadge}</div>
                     <div class="info" style="margin-bottom:2px;">${simCopy(d.sim1,'SIM1')}</div>
                     <div class="info" style="margin-bottom:2px;">${simCopy(d.sim2,'SIM2')}</div>
