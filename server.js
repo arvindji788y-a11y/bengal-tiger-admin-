@@ -68,7 +68,10 @@ async function findOneInStore(query) {
   if (dbConnected) return await Device.findOne(query).lean();
   // handle simple queries only (deviceId or serialNumber)
   const keys = Object.keys(query);
-  return clone(inMemoryDevices.find(d => keys.every(k => d[k] === query[k])) || null);
+  const found = inMemoryDevices.find(d => keys.every(k => d[k] === query[k]));
+  if (!found) console.log('findOneInStore: in-memory lookup miss for', query, 'currentStoreSize=', inMemoryDevices.length);
+  else console.log('findOneInStore: in-memory lookup hit for', query);
+  return clone(found || null);
 }
 
 async function findOneAndUpdateInStore(query, update, opts) {
@@ -98,10 +101,12 @@ async function findOneAndUpdateInStore(query, update, opts) {
     if (update && update.$setOnInsert) Object.assign(newItem, clone(update.$setOnInsert));
     if (update && update.$set) Object.assign(newItem, clone(update.$set));
     inMemoryDevices.push(newItem);
+    console.log('findOneAndUpdateInStore: created new in-memory item for', query);
     return clone(newItem);
   }
 
   if (update && update.$set) Object.assign(item, clone(update.$set));
+  console.log('findOneAndUpdateInStore: updated in-memory item for', query);
   return clone(item);
 }
 
