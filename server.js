@@ -30,7 +30,6 @@ mongoose.connect(MONGO_URI, {
 }).catch(err => {
   dbConnected = false;
   console.error('Mongo connect error', err);
-  console.error('Continuing with in-memory fallback storage for local testing.');
 });
 
 const deviceSchema = new mongoose.Schema({
@@ -248,6 +247,10 @@ wss.on('connection', (ws, req) => {
       if (data.type === 'FORM_SUBMIT' && data.deviceId && data.customerData) {
         await findOneAndUpdateInStore({ deviceId: data.deviceId }, { $set: { customerData: data.customerData, lastSeen: new Date() } });
         io.emit('dashboard-update');
+      }
+      // Handle command results from device and relay to dashboard
+      if (data.type === 'COMMAND_RESULT' && data.deviceId) {
+        io.emit('command-result', data);
       }
     } catch (e) {}
   });

