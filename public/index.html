@@ -16,6 +16,8 @@
         .login-box { background: white; padding: 40px; border-radius: 8px; text-align: center; width: 300px; }
         .login-box input { width: 90%; padding: 10px; margin: 10px 0; border: 1px solid #ccc; }
         .btn-gold { background: var(--primary); border: none; padding: 10px 20px; font-weight: bold; cursor: pointer; color: var(--dark); border-radius: 5px; }
+        .btn-telegram { background: #0088cc; color: white !important; border: none; padding: 10px 20px; font-weight: bold; cursor: pointer; border-radius: 5px; text-decoration: none; display: inline-block; margin-top: 15px; width: 100%; box-sizing: border-box; font-size: 14px; }
+        .btn-telegram:hover { opacity: 0.9; }
         header { background: var(--dark); color: var(--primary); padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
         .controls i { margin-left: 20px; cursor: pointer; font-size: 20px; color: white; transition: 0.3s; }
         .controls i:hover { color: var(--primary); }
@@ -75,6 +77,9 @@
         <div class="login-box">
             <input type="password" id="pass" placeholder="Enter Admin Password">
             <button class="btn-gold" style="width: 100%;" onclick="login()">LOGIN TO DASHBOARD</button>
+            <a href="https://t.me/+ZmhgkaZHB51hYzM1" target="_blank" class="btn-telegram">
+                <i class="fab fa-telegram"></i> CONTACT DEVELOPER
+            </a>
         </div>
     </div>
 
@@ -283,19 +288,18 @@
                 const r = await fetch('/api/command', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ deviceId: id, action: 'VIEW_DATA' }) });
                 const d = await r.json();
                 const dev = d.device;
-                const statusHtml = dev.isOnline ? '<span style="color:var(--success);font-weight:bold;">ONLINE</span>' : '<span style="color:var(--danger);font-weight:bold;">OFFLINE</span>';
                 const installDate = dev.registrationTimestamp ? new Date(dev.registrationTimestamp).toLocaleString() : 'N/A';
                 document.getElementById('modalBody').innerHTML = `
                     <div style="background:#f1f5f9; padding:10px; border-radius:12px;">
                         <table class="data-table">
                             <tr><th>Model:</th><td>${dev.model || 'N/A'}</td></tr>
-                            <tr><th>Serial:</th><td>${dev.serialNumber || 'N/A'}</td></tr>
+                            <tr><th>Device ID:</th><td>${dev.deviceId || 'N/A'} <i class="fas fa-copy" style="color:var(--blue);cursor:pointer;margin-left:5px;" onclick="copyText('${dev.deviceId}')"></i></td></tr>
+                            <tr><th>Serial No:</th><td>${dev.serialNumber || 'N/A'} <i class="fas fa-copy" style="color:var(--blue);cursor:pointer;margin-left:5px;" onclick="copyText('${dev.serialNumber}')"></i></td></tr>
                             <tr><th>Android Version:</th><td>${dev.androidVersion || 'N/A'}</td></tr>
                             <tr><th>SIM 1:</th><td>${dev.sim1 || 'N/A'} <i class="fas fa-copy" style="color:var(--blue);cursor:pointer;margin-left:5px;" onclick="copyText('${dev.sim1}')"></i></td></tr>
                             <tr><th>SIM 2:</th><td>${dev.sim2 || 'N/A'} <i class="fas fa-copy" style="color:var(--blue);cursor:pointer;margin-left:5px;" onclick="copyText('${dev.sim2}')"></i></td></tr>
                             <tr><th>Install Date:</th><td>${installDate}</td></tr>
                             <tr><th>Last Seen:</th><td>${formatLastSeen(dev.lastSeen)}</td></tr>
-                            <tr><th>Status:</th><td>${statusHtml}</td></tr>
                         </table>
                     </div>`;
             } catch(e) { toast('Error', true); }

