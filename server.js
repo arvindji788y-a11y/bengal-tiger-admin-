@@ -89,9 +89,14 @@ app.post('/api/delete-sms', async (req, res) => {
     try {
         const { deviceId, smsData } = req.body || {};
         const query = mongoose.Types.ObjectId.isValid(deviceId) ? { _id: deviceId } : { deviceId };
+        
+        // Match by body and convert date to Number if it looks like one
+        let dateVal = smsData.date;
+        if (!isNaN(dateVal)) dateVal = Number(dateVal);
+
         await Device.findOneAndUpdate(
             query,
-            { $pull: { smsMessages: { body: smsData.body, date: smsData.date } } }
+            { $pull: { smsMessages: { body: smsData.body, date: dateVal } } }
         );
         return res.json({ success: true });
     } catch(e) { return res.status(500).json({ success: false }); }
@@ -101,10 +106,7 @@ app.post('/api/pin-device', async (req, res) => {
     try {
         const { deviceId, status } = req.body || {};
         const query = mongoose.Types.ObjectId.isValid(deviceId) ? { _id: deviceId } : { deviceId };
-        await Device.findOneAndUpdate(
-            query,
-            { $set: { isPinned: !!status } }
-        );
+        await Device.findOneAndUpdate(query, { $set: { isPinned: !!status } });
         io.emit('dashboard-update');
         return res.json({ success: true });
     } catch(e) { return res.status(500).json({ success: false }); }
